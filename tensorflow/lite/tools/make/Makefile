@@ -55,7 +55,8 @@ LIBS := \
 # There are no rules for compiling objects for the host system (since we don't
 # generate things like the protobuf compiler that require that), so all of
 # these settings are for the target compiler.
-CXXFLAGS := -O3 -DNDEBUG -fPIC
+# CXXFLAGS := -O3 -DNDEBUG -fPIC
+CXXFLAGS := -g -fPIC
 CXXFLAGS += $(EXTRA_CXXFLAGS)
 CFLAGS := ${CXXFLAGS}
 CXXFLAGS += --std=c++11
@@ -276,6 +277,12 @@ $(LIB_PATH): tensorflow/lite/schema/schema_generated.h $(LIB_OBJS)
 	$(AR) $(ARFLAGS) $(LIB_PATH) $(LIB_OBJS)
 
 lib: $(LIB_PATH)
+
+list_lib_src:
+	@echo TF_LITE_LIB_SRC $(TF_LITE_CC_SRCS)
+
+list_lib_inc:
+	@echo TF_LITE_INCLUDES $(INCLUDES)
 
 $(MINIMAL_BINARY): $(MINIMAL_OBJS) $(LIB_PATH)
 	@mkdir -p $(dir $@)
