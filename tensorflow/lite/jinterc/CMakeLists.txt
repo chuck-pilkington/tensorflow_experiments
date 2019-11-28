@@ -11,8 +11,14 @@ if(NOT DEFINED ENV{SNPS_AI_INSTALL_DIR})
     message( FATAL_ERROR "Environment variable SNPS_AI_INSTALL_DIR is required")
 endif()
 
-set(SNPS_AI_INSTALL_DIR $ENV{SNPS_AI_INSTALL_DIR})
-set(CMAKE_INSTALL_PREFIX "${SNPS_AI_INSTALL_DIR}")
+if(DEFINED ENV{SNPS_INSTALL_DIR})
+    set(CMAKE_INSTALL_PREFIX $ENV{SNPS_INSTALL_DIR})
+    set(CMAKE_PREFIX_PATH ${CMAKE_INSTALL_PREFIX})
+    message(STATUS "V0: Setting CMAKE_PREFIX_PATH to ${CMAKE_PREFIX_PATH}")
+    message(STATUS "V0: Setting SNPS install prefix to ${CMAKE_INSTALL_PREFIX}")
+endif()
+
+find_package(tabeq REQUIRED)
 
 set(LOCAL_CFLAGS " -DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK -pthread")
 
@@ -36,16 +42,14 @@ include_directories(BEFORE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../..
 )
 
-message(STATUS "About to include TfLiteDecls...")
 include(TfLiteDecls)
-# message(STATUS "TFLITE_SRC: ${TFLITE_SRC}")
-message(STATUS "After include of TfLiteDecls...")
 
 list(APPEND LIB_SRC_FILES ${TFLITE_SRC})
 
 # add_executable(mintest ${LIB_SRC_FILES} ${MIN_SRC_FILES})
 add_executable(mintest ${MIN_SRC_FILES})
 target_link_libraries(mintest ${project_name})
+target_link_libraries(mintest tabeq::tabeq)
 
 # -- The TFL makefile is a mess, it includes lots of src files that define
 # main.  Therefore, can't build shared lib....
@@ -53,6 +57,8 @@ target_link_libraries(mintest ${project_name})
 #add_library(${project_name} SHARED ${LIB_SRC_FILES})
 
 add_library(${project_name} ${LIB_SRC_FILES})
+
+target_link_libraries(${project_name} tabeq::tabeq)
 
 # -- The rest of this file is boilerplate installation & packaging
 #
