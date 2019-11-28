@@ -27,7 +27,13 @@ TfLiteRegistration* Register_DETECTION_POSTPROCESS();
 
 }  // namespace custom
 
+namespace jinterc {
+  TfLiteRegistration* Register_FULLY_CONNECTED_JINTERC();
+}
+
 namespace builtin {
+
+using namespace tflite::ops::jinterc;
 
 // TODO(yunluli): Some of the registries, e.g. Tanh(), could only invoke
 // optimized kernels. Add a _REF() variant for them.
@@ -188,7 +194,9 @@ BuiltinJintercOpResolver::BuiltinJintercOpResolver() {
   AddBuiltin(BuiltinOperator_EMBEDDING_LOOKUP, Register_EMBEDDING_LOOKUP());
   AddBuiltin(BuiltinOperator_EMBEDDING_LOOKUP_SPARSE,
              Register_EMBEDDING_LOOKUP_SPARSE());
-  AddBuiltin(BuiltinOperator_FULLY_CONNECTED, Register_FULLY_CONNECTED_REF(),
+  
+  //AddBuiltin(BuiltinOperator_FULLY_CONNECTED, Register_FULLY_CONNECTED_REF(),
+  AddBuiltin(BuiltinOperator_FULLY_CONNECTED, Register_FULLY_CONNECTED_JINTERC(),
              /* min_version */ 1,
              /* max_version */ 2);
   AddBuiltin(BuiltinOperator_LSH_PROJECTION, Register_LSH_PROJECTION());

@@ -35,7 +35,7 @@ limitations under the License.
 
 namespace tflite {
 namespace ops {
-namespace builtin {
+namespace jinterc {
 namespace fully_connected {
 
 // This file has four implementations of FullyConnected
@@ -518,6 +518,9 @@ TfLiteStatus EvalFloat(TfLiteContext* context, TfLiteNode* node,
 
 template <KernelType kernel_type>
 TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
+
+  printf("Hello, in the JINTERC fully connect eval function...\n");
+
   auto* params =
       reinterpret_cast<TfLiteFullyConnectedParams*>(node->builtin_data);
   OpData* data = reinterpret_cast<OpData*>(node->user_data);
@@ -571,32 +574,13 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
 
 }  // namespace fully_connected
 
-TfLiteRegistration* Register_FULLY_CONNECTED_REF() {
+TfLiteRegistration* Register_FULLY_CONNECTED_JINTERC() {
   static TfLiteRegistration r = {
       fully_connected::Init, fully_connected::Free, fully_connected::Prepare,
       fully_connected::Eval<fully_connected::kReference>};
   return &r;
 }
 
-TfLiteRegistration* Register_FULLY_CONNECTED_GENERIC_OPT() {
-  static TfLiteRegistration r = {
-      fully_connected::Init, fully_connected::Free, fully_connected::Prepare,
-      fully_connected::Eval<fully_connected::kGenericOptimized>};
-  return &r;
-}
-
-// Legacy path for PIE clients.
-TfLiteRegistration* Register_FULLY_CONNECTED_PIE() {
-  static TfLiteRegistration r = {
-      fully_connected::Init, fully_connected::Free, fully_connected::Prepare,
-      fully_connected::Eval<fully_connected::kLegacyPie>};
-  return &r;
-}
-
-TfLiteRegistration* Register_FULLY_CONNECTED() {
-  return Register_FULLY_CONNECTED_GENERIC_OPT();
-}
-
-}  // namespace builtin
+}  // namespace jinterc
 }  // namespace ops
 }  // namespace tflite

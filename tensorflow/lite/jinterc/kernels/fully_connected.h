@@ -25,10 +25,8 @@ limitations under the License.
 
 namespace tflite {
 namespace ops {
-namespace builtin {
-TfLiteRegistration* Register_FULLY_CONNECTED_REF();
-TfLiteRegistration* Register_FULLY_CONNECTED_GENERIC_OPT();
-TfLiteRegistration* Register_FULLY_CONNECTED_PIE();
+namespace jinterc {
+TfLiteRegistration* Register_FULLY_CONNECTED_JINTERC();
 }  // namespace builtin
 }  // namespace ops
 }  // namespace tflite
