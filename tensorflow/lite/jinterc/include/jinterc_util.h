@@ -2,7 +2,7 @@
 #define _jinterc_util_h_
 #endif
 
-#include <jinterc.h>
+#include <jinterc/jinterc.h>
 
 namespace tflite {
 namespace jinterc {

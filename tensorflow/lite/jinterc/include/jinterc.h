@@ -12,7 +12,7 @@
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/c_api_internal.h"
 
-#include <jinterc_util.h>
+#include <jinterc/jinterc_util.h>
 
 class JintercException : public std::exception {
 
@@ -23,7 +23,6 @@ class JintercException : public std::exception {
 
     JintercException(std::string m) { msg = m; }
 };
-
 
 /**
  * Initial build flow testing

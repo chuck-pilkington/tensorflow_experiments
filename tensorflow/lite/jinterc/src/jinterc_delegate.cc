@@ -6,9 +6,12 @@
 #include <stdint.h>
 #include <vector>
 
-#include "jinterc.h"
+#include "jinterc/jinterc.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/c_api_internal.h"
+#include "tensorflow/lite/context_util.h"
+
+using TfLiteIntArrayView = tflite::TfLiteIntArrayView;
 
 // This is where the execution of the operations or whole graph happens.
 // The class below has an empty implementation just as a guideline
@@ -18,8 +21,7 @@ class JintercDelegate {
     // Returns true if my delegate can handle this type of op.
     static bool SupportedOp(const TfLiteRegistration* registration) {
         switch (registration->builtin_code) {
-            case kTfLiteBuiltinConv2d:
-            case kTfLiteBuiltinMean:
+            case kTfLiteBuiltinFullyConnected:
                 return true;
             default:
                 return false;
@@ -27,34 +29,45 @@ class JintercDelegate {
     }
 
     // Any initialization code needed
-    bool Init(TfLiteContext* context,
-              const TfLiteDelegateParams* delegate_params) {
+    TfLiteStatus Init(TfLiteContext* context,
+                      const TfLiteDelegateParams* delegate_params) {
 
-        throw new JintercException("Unsupported method called");
+        printf("Warning: Unsupported 'Init' method called\n");
+
+        // throw JintercException("Unsupported 'Init' method called");
+
+        return kTfLiteOk;
     }
 
     // Any preparation work needed (e.g. allocate buffers)
-    bool Prepare(TfLiteContext* context, TfLiteNode* node) {
-        throw new JintercException("Unsupported method called");
+    TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
+        // throw JintercException("Unsupported 'Prepare' method called");
+        printf("Warning: Unsupported 'Prepare' method called\n");
+        return kTfLiteOk;
     }
-    
+
     // Actual running of the delegate subgraph.
-    bool Invoke(TfLiteContext* context, TfLiteNode* node) {
-        throw new JintercException("Unsupported method called");
+    TfLiteStatus Invoke(TfLiteContext* context, TfLiteNode* node) {
+        // throw JintercException("Unsupported 'Invoke' method called");
+        printf("Warning: Unsupported 'Invoke' method called\n");
+        return kTfLiteOk;
     }
+
     // ... Add any other methods needed.
+
+    // -- testing destructor...
+    //
+    ~JintercDelegate() { printf("Destructing Jinterc delegate...\n"); }
 };
 
-// Create the TfLiteRegistration for the Kernel node which will replace
 // the subgraph in the main TfLite graph.
 TfLiteRegistration GetJintercDelegateNodeRegistration() {
-    // This is the registration for the Delegate Node that gets added to
-    // the TFLite graph instead of the subGraph it replaces.
-    // It is treated as a an OP node. But in our case
-    // Init will initialize the delegate
-    // Invoke will run the delegate graph.
-    // Prepare for preparing the delegate.
-    // Free for any cleaning needed by the delegate.
+    // This is the registration for the Delegate Node that gets
+    // added to the TFLite graph instead of the subGraph it
+    // replaces. It is treated as a an OP node. But in our case Init
+    // will initialize the delegate Invoke will run the delegate
+    // graph. Prepare for preparing the delegate. Free for any
+    // cleaning needed by the delegate.
     TfLiteRegistration kernel_registration;
     kernel_registration.builtin_code = kTfLiteBuiltinDelegate;
     kernel_registration.custom_name = "JintercDelegate";
@@ -64,11 +77,12 @@ TfLiteRegistration GetJintercDelegateNodeRegistration() {
     };
     kernel_registration.init = [](TfLiteContext* context, const char* buffer,
                                   size_t) -> void* {
-        // In the node init phase, initialize JintercDelegate instance
+        // In the node init phase, initialize JintercDelegate
+        // instance
         const TfLiteDelegateParams* delegate_params =
             reinterpret_cast<const TfLiteDelegateParams*>(buffer);
         JintercDelegate* my_delegate = new JintercDelegate;
-        if (!my_delegate->Init(context, params)) {
+        if (!my_delegate->Init(context, delegate_params)) {
             return nullptr;
         }
         return my_delegate;
@@ -92,9 +106,10 @@ TfLiteRegistration GetJintercDelegateNodeRegistration() {
 // TfLiteDelegate methods
 
 TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
-    // Claim all nodes that can be evaluated by the delegate and ask the
-    // framework to update the graph with delegate kernel instead.
-    // Reserve 1 element, since we need first element to be size.
+    // Claim all nodes that can be evaluated by the delegate and ask
+    // the framework to update the graph with delegate kernel
+    // instead. Reserve 1 element, since we need first element to be
+    // size.
     std::vector<int> supported_nodes(1);
     TfLiteIntArray* plan;
     TF_LITE_ENSURE_STATUS(context->GetExecutionPlan(context, &plan));
@@ -112,8 +127,8 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
     TfLiteRegistration my_delegate_kernel_registration =
         GetJintercDelegateNodeRegistration();
 
-    // This call split the graphs into subgraphs, for subgraphs that can be
-    // handled by the delegate, it will replace it with a
+    // This call split the graphs into subgraphs, for subgraphs that
+    // can be handled by the delegate, it will replace it with a
     // 'my_delegate_kernel_registration'
     return context->ReplaceNodeSubsetsWithDelegateKernels(
         context, my_delegate_kernel_registration,
@@ -137,7 +152,8 @@ TfLiteStatus CopyFromBufferHandle(TfLiteContext* context,
                                   TfLiteDelegate* delegate,
                                   TfLiteBufferHandle buffer_handle,
                                   TfLiteTensor* tensor) {
-    // Copies the data from delegate buffer into the tensor raw memory.
+    // Copies the data from delegate buffer into the tensor raw
+    // memory.
     return kTfLiteOk;
 }
 
@@ -158,6 +174,7 @@ TfLiteDelegate* CreateJintercDelegate() {
     return delegate;
 }
 
+#if 0
 // To add the delegate you need to call
 
 auto* my_delegate = CreateJintercDelegate();
@@ -169,5 +186,6 @@ if (interpreter->ModifyGraphWithDelegate(my_delegate) != kTfLiteOk) {
 ...
     // Don't forget to delete your delegate
     delete my_delegate;
+#endif
 
 #endif
