@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_LITE_DELEGATES_GPU_DELEGATE_H_
-#define TENSORFLOW_LITE_DELEGATES_GPU_DELEGATE_H_
+#ifndef TENSORFLOW_LITE_DELEGATES_JINTERC_DELEGATE_H_
+#define TENSORFLOW_LITE_DELEGATES_JINTERC_DELEGATE_H_
 
 #include <stdint.h>
 
@@ -39,34 +39,34 @@ extern "C" {
 #endif  // __cplusplus
 
 // Encapsulated compilation/runtime tradeoffs.
-enum TfLiteGpuInferenceUsage {
+enum TfLiteJintercInferenceUsage {
   // Delegate will be used only once, therefore, bootstrap/init time should
   // be taken into account.
-  TFLITE_GPU_INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER = 0,
+  TFLITE_JINTERC_INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER = 0,
 
   // Prefer maximizing the throughput. Same delegate will be used repeatedly on
   // multiple inputs.
-  TFLITE_GPU_INFERENCE_PREFERENCE_SUSTAINED_SPEED = 1,
+  TFLITE_JINTERC_INFERENCE_PREFERENCE_SUSTAINED_SPEED = 1,
 };
 
-enum TfLiteGpuInferencePriority {
-  TFLITE_GPU_INFERENCE_PRIORITY_MAX_PRECISION = 0,
-  TFLITE_GPU_INFERENCE_PRIORITY_MIN_LATENCY = 1,
-  TFLITE_GPU_INFERENCE_PRIORITY_MIN_MEMORY_USAGE = 2,
+enum TfLiteJintercInferencePriority {
+  TFLITE_JINTERC_INFERENCE_PRIORITY_MAX_PRECISION = 0,
+  TFLITE_JINTERC_INFERENCE_PRIORITY_MIN_LATENCY = 1,
+  TFLITE_JINTERC_INFERENCE_PRIORITY_MIN_MEMORY_USAGE = 2,
 };
 
-// IMPORTANT: Always use TfLiteGpuDelegateOptionsV2Default() method to create
-// new instance of TfLiteGpuDelegateOptionsV2, otherwise every new added option
+// IMPORTANT: Always use TfLiteJintercDelegateOptionsDefault() method to create
+// new instance of TfLiteJintercDelegateOptions, otherwise every new added option
 // may break inference.
 typedef struct {
   // When set to zero, computations are carried out in maximal possible
-  // precision. Otherwise, the GPU may quantify tensors, downcast values,
+  // precision. Otherwise, the JINTERC may quantify tensors, downcast values,
   // process in FP16 to increase performance. For most models precision loss is
   // warranted.
   // [OBSOLETE]: to be removed
   int32_t is_precision_loss_allowed;
 
-  // Preference is defined in TfLiteGpuInferencePreference.
+  // Preference is defined in TfLiteJintercInferencePreference.
   int32_t inference_preference;
 
   // Ordered priorities provide better control over desired semantics,
@@ -77,35 +77,35 @@ typedef struct {
   //   MAX_PRECISION at priority1 would not allow to decrease presision,
   //   but moving it to priority2 or priority3 would result in F16 calculation.
   //
-  // Priority is defined in TfLiteGpuInferencePriority.
+  // Priority is defined in TfLiteJintercInferencePriority.
   int32_t inference_priority1;
   int32_t inference_priority2;
   int32_t inference_priority3;
-} TfLiteGpuDelegateOptionsV2;
+} TfLiteJintercDelegateOptions;
 
-// Populates TfLiteGpuDelegateOptionsV2 as follows:
+// Populates TfLiteJintercDelegateOptions as follows:
 //   is_precision_loss_allowed = false
-//   inference_preference = TFLITE_GPU_INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER
-//   priority1 = TFLITE_GPU_INFERENCE_PRIORITY_MAX_PRECISION
-//   priority2 = TFLITE_GPU_INFERENCE_PRIORITY_MIN_LATENCY
-//   priority3 = TFLITE_GPU_INFERENCE_PRIORITY_MIN_MEMORY_USAGE
-TFL_CAPI_EXPORT TfLiteGpuDelegateOptionsV2 TfLiteGpuDelegateOptionsV2Default();
+//   inference_preference = TFLITE_JINTERC_INFERENCE_PREFERENCE_FAST_SINGLE_ANSWER
+//   priority1 = TFLITE_JINTERC_INFERENCE_PRIORITY_MAX_PRECISION
+//   priority2 = TFLITE_JINTERC_INFERENCE_PRIORITY_MIN_LATENCY
+//   priority3 = TFLITE_JINTERC_INFERENCE_PRIORITY_MIN_MEMORY_USAGE
+TFL_CAPI_EXPORT TfLiteJintercDelegateOptions TfLiteJintercDelegateOptionsDefault();
 
 // Creates a new delegate instance that need to be destroyed with
-// TfLiteGpuDelegateV2Delete when delegate is no longer used by TFLite.
+// TfLiteJintercDelegateDelete when delegate is no longer used by TFLite.
 //
-// This delegate encapsulates multiple GPU-acceleration APIs under the hood to
+// This delegate encapsulates multiple JINTERC-acceleration APIs under the hood to
 // make use of the fastest available on a device.
 //
 // When `options` is set to `nullptr`, then default options are used.
-TFL_CAPI_EXPORT TfLiteDelegate* TfLiteGpuDelegateV2Create(
-    const TfLiteGpuDelegateOptionsV2* options);
+TFL_CAPI_EXPORT TfLiteDelegate* TfLiteJintercCreate(
+    const TfLiteJintercDelegateOptions* options);
 
-// Destroys a delegate created with `TfLiteGpuDelegateV2Create` call.
-TFL_CAPI_EXPORT void TfLiteGpuDelegateV2Delete(TfLiteDelegate* delegate);
+// Destroys a delegate created with `TfLiteJintercCreate` call.
+TFL_CAPI_EXPORT void TfLiteJintercDelegateDelete(TfLiteDelegate* delegate);
 
 #ifdef __cplusplus
 }
 #endif  // __cplusplus
 
-#endif  // TENSORFLOW_LITE_DELEGATES_GPU_DELEGATE_H_
+#endif  // TENSORFLOW_LITE_DELEGATES_JINTERC_DELEGATE_H_

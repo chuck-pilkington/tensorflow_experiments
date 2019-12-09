@@ -12,7 +12,9 @@
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/c_api_internal.h"
 
-#include <jinterc/jinterc_util.h>
+#include "jinterc_util.h"
+#include "jinterc_status.h"
+#include "jinterc_lower.h"
 
 class JintercException : public std::exception {
 
@@ -23,6 +25,38 @@ class JintercException : public std::exception {
 
     JintercException(std::string m) { msg = m; }
 };
+
+namespace tflite {
+namespace jinterc {
+
+
+
+// Encapsulated compilation/runtime tradeoffs.
+enum class InferenceUsage {
+    UNKNOWN,
+
+    // InferenceRunner will be used only once. Therefore, it is important to
+    // minimize bootstrap time as well.
+    FAST_SINGLE_ANSWER,
+
+    // Prefer maximizing the throughput. Same inference runner will be used
+    // repeatedly on different inputs.
+    SUSTAINED_SPEED,
+};
+
+// Defines aspects to control while instantiating a runner.
+enum class InferencePriority {
+    UNKNOWN,
+
+    MIN_LATENCY,
+
+    MAX_PRECISION,
+
+    MIN_MEMORY_USAGE,
+};
+
+}  // namespace jinterc
+}  // namespace tflite
 
 /**
  * Initial build flow testing
