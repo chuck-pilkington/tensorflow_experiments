@@ -12,9 +12,8 @@
 #include "tensorflow/lite/c/builtin_op_data.h"
 #include "tensorflow/lite/c/c_api_internal.h"
 
-#include "jinterc_util.h"
-#include "jinterc_status.h"
 #include "jinterc_lower.h"
+#include "jinterc_util.h"
 
 class JintercException : public std::exception {
 
@@ -28,8 +27,6 @@ class JintercException : public std::exception {
 
 namespace tflite {
 namespace jinterc {
-
-
 
 // Encapsulated compilation/runtime tradeoffs.
 enum class InferenceUsage {

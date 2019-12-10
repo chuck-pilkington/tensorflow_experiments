@@ -19,7 +19,7 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "absl/types/span.h"
+#include <tabeq/status.h>
 #include "tensorflow/lite/builtin_ops.h"
 
 #include "tensorflow/lite/jinterc/include/jinterc.h"
@@ -41,6 +41,8 @@ limitations under the License.
 
 namespace tflite {
 namespace jinterc {
+
+using Status = tabeq::Status;
 
 InferencePriority ToPriority(int32_t priority) {
     switch (priority) {
