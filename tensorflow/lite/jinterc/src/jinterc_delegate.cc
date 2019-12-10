@@ -39,8 +39,12 @@ limitations under the License.
 
 #include "tensorflow/lite/minimal_logging.h"
 
+#include <internal/tabeq_builder.h>
+
 namespace tflite {
 namespace jinterc {
+
+using namespace ::tflite::tabeq;
 
 using Status = tabeq::Status;
 

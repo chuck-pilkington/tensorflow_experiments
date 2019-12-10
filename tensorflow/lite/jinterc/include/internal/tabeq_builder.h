@@ -18,11 +18,16 @@ limitations under the License.
 #include <cstdint>
 #include <string>
 
-#include "tensorflow/lite/context.h"
 #include <tabeq/model.h>
+#include "tensorflow/lite/context.h"
 
 namespace tflite {
 namespace tabeq {
+
+using Status = ::tabeq::Status;
+using TabeqGraph = ::tabeq::model::TabeqGraph;
+using TensorRef = ::tabeq::model::TensorRef;
+using Node = ::tabeq::model::Node;
 
 // Validates which operations are supported and returns array of operations to
 // replace with GPU kernels. The caller must free the pointer on TfLiteIntArray.
@@ -30,15 +35,15 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context);
 
 // Extracts TFLite delegate execution plan from the input TFLite context and
 // converts it into generic graph format.
-tabeq::Status BuildModel(TfLiteContext* context,
+Status BuildModel(TfLiteContext* context,
                   const TfLiteDelegateParams* delegate_params,
-                  GraphFloat32* graph);
+                  TabeqGraph* graph);
 
 // Module-internal converter, exposed for unit testing purpose only.
-tabeq::Status ConvertTfLiteTensorToTensorRef(const TfLiteTensor& tflite_tensor,
-                                      TensorRef<BHWC>* tensor_ref);
+Status ConvertTfLiteTensorToTensorRef(const TfLiteTensor& tflite_tensor,
+                                      TensorRef* tensor_ref);
 
-}  // namespace gpu
+}  // namespace tabeq
 }  // namespace tflite
 
 #endif  // TABEQ_MODEL_BUILDER_H_
