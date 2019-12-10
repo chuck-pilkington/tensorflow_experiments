@@ -13,7 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef NO_ORIG_CODE
+// #ifndef NO_ORIG_CODE
+
+#if 0
+
 /**
  * This is original TF code for reference.  It is not included in testing 
  * builds.
