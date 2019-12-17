@@ -90,21 +90,23 @@ class Delegate {
     Status Prepare(TfLiteContext* context,
                    const TfLiteDelegateParams* delegate_params) {
 
-#if 1
+#if 0
         throw JintercException(
             "Unsupported Jinterc Delegate 'Prepare' method called");
 #else
         // Extract TFLite delegate execution plan from the context and convert
         // it into FlowGraph32.
-        GraphFloat32 graph;
+        TabeqGraph graph;
         RETURN_IF_ERROR(BuildModel(context, delegate_params, &graph));
 
+#if 0
         // Apply general transformations on the graph.
         NullTransformationReporter reporter;
         ModelTransformer transformer(&graph, &reporter);
         if (!ApplyGeneralTransformations(&transformer)) {
             return InternalError("Graph general transformations failed");
         }
+#endif
 
         std::vector<uint32_t> input_refs;
         {
@@ -131,7 +133,7 @@ class Delegate {
             context->ReportError(context, "Falling back to OpenGL");
             RETURN_IF_ERROR(InitializeOpenGlApi(&graph, &builder));
         }
-#endif
+
 
         // At this point tflite didn't allocate tensors yet, therefore, collect
         // indices and set all input and output tensors from tflite later.
@@ -149,8 +151,14 @@ class Delegate {
             RETURN_IF_ERROR(builder->SetOutputObjectDef(
                 object_index, GetObjectDef(tensor_index)));
         }
+#endif
 
+#if 1
+    throw JintercException("Need to implement tabeq builder");
+#else
         return builder->Build(&runner_);
+#endif
+
 #endif
     }
 

@@ -273,7 +273,7 @@ class TFLiteOperationParser {
                          const TfLiteRegistration* registration,
                          TabeqGraph* graph, ObjectReader* reader) = 0;
 
-    // Verifies whether passed tflite node may be built by GPU delegate or not.
+    // Verifies whether passed tflite node may be built by Jinterc delegate.
     virtual Status IsSupported(const TfLiteContext* context,
                                const TfLiteNode* tflite_node,
                                const TfLiteRegistration* registration) = 0;
@@ -490,12 +490,19 @@ Status IsSupported(const TfLiteContext* context, TfLiteNode* node,
         ->IsSupported(context, node, registration);
 }
 
+/**
+ * For current experiments, only handle 32 bit floats
+ */
 bool IsAllFloatTensors(const TfLiteContext* context,
                        const TfLiteIntArray* array) {
     for (int i = 0; i < array->size; ++i) {
         const TfLiteTensor* t = context->tensors + array->data[i];
-        bool const type_supported =
-            (t->type == kTfLiteFloat32 || t->type == kTfLiteFloat16);
+
+        // bool const type_supported =
+        //     (t->type == kTfLiteFloat32 || t->type == kTfLiteFloat16);
+
+        bool const type_supported = (t->type == kTfLiteFloat32);
+
         if (t->allocation_type == kTfLiteArenaRw && !type_supported) {
             return false;
         }
@@ -564,9 +571,9 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context) {
     if (!errors.empty()) {
         std::string unsupported = absl::StrJoin(errors, "\n");
         std::string error_message =
-            "Next operations are not supported by GPU delegate:\n" +
+            "Next operations are not supported by Jinterc delegate:\n" +
             unsupported + "\nFirst " + std::to_string(subgraph->size) +
-            " operations will run on the GPU, and the remaining " +
+            " operations will run using Jinterc, and the remaining " +
             std::to_string(execution_plan->size - subgraph->size) +
             " on the CPU.";
         context->ReportError(context, error_message.c_str());
@@ -574,7 +581,7 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context) {
     return subgraph;
 }
 
-#if 0
+#if 1
 Status BuildModel(TfLiteContext* context,
                   const TfLiteDelegateParams* delegate_params,
                   TabeqGraph* graph) {
@@ -600,10 +607,12 @@ Status BuildModel(TfLiteContext* context,
         operations.push_back(std::move(op_parser));
         tflite_nodes.push_back(i);
     }
-  std::vector<Value<TensorRef>*> tensor_to_value(context->tensors_size,
-  std::vector<Value<TensorRef<BHWC>>*> tensor_to_value(context->tensors_size,
-                                                       nullptr);
-  for (int i = 0; i < operations.size(); ++i) {
+    std::vector<Value<TensorRef>*> tensor_to_value(context->tensors_size,
+                                                   nullptr);
+    //   std::vector<Value<TensorRef<BHWC>>*>
+    //   tensor_to_value(context->tensors_size,
+    //                                                        nullptr);
+    for (int i = 0; i < operations.size(); ++i) {
         TfLiteNode* tflite_node;
         TfLiteRegistration* registration;
         RETURN_IF_ERROR(GetNodeAndRegistration(
@@ -617,8 +626,8 @@ Status BuildModel(TfLiteContext* context,
                 absl::StrCat(GetOpNameByRegistration(registration), ": ",
                              status.error_message()));
         }
-  }
-  return OkStatus();
+    }
+    return OkStatus();
 }
 #endif
 
