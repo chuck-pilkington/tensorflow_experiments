@@ -237,12 +237,12 @@ list(APPEND TFLITE_SRC /home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/d
 
 # -- The next section adds include directories to use...
 #
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/../../../../../")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/../../../../../../")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/eigen")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/absl")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/gemmlowp")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/neon_2_sse")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/farmhash/src")
-include_directories("/scratch/chuck/src/tensorflow/tensorflow/lite/tools/make/downloads/flatbuffers/include")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/../../../../../")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/../../../../../../")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/eigen")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/absl")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/gemmlowp")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/neon_2_sse")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/farmhash/src")
+include_directories("/home/cpilking/src/ev_quebec/tensorflow/tensorflow/lite/tools/make/downloads/flatbuffers/include")

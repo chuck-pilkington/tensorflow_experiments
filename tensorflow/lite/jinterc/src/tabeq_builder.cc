@@ -57,6 +57,8 @@ namespace tabeq {
 using namespace ::tabeq::model;
 using namespace ::tabeq;
 
+using TabeqTensor = ::tabeq::model::Tensor;
+
 int GetNumberOfRuntimeInputsForNode(const TfLiteContext* context,
                                     const TfLiteNode* tflite_node) {
     int number_of_runtime_inputs = 0;
@@ -103,12 +105,102 @@ Status CheckMaxSupportedOpVersion(const TfLiteRegistration* registration,
     return OkStatus();
 }
 
+
+/**
+ * TODO: Fix this incorrect stuff.
+ */
+Status ExtractTensorShape(const TfLiteTensor& tflite_tensor, Shape& shape) {
+
+    printf("TODO: Figure out tensor layouts");
+
+    shape.layout = tabeq::model::TensorLayout::BHWC;
+
+    const int* d = tflite_tensor.dims->data;
+
+    shape.dims = {1, 1, 1, 1};
+
+    switch (tflite_tensor.dims->size) {
+        case 1:
+            shape.w(d[0]);
+            break;
+
+        case 2:
+            shape.h(d[0]);
+            shape.w(d[1]);
+            break;
+
+        case 3:
+            shape.h(d[0]);
+            shape.w(d[1]);
+            shape.c(d[2]);
+            break;
+
+        case 4:
+            shape.b(d[0]);
+            shape.h(d[1]);
+            shape.w(d[2]);
+            shape.c(d[3]);
+            break;
+
+        default:
+            return InvalidArgumentError(absl::StrCat(
+                "Tensor \"",
+                tflite_tensor.name ? tflite_tensor.name : "nullptr",
+                "\" has bad input dims size: ", tflite_tensor.dims->size, "."));
+    }
+
+    return OkStatus();
+}
+
+Status ConvertTensorType(const TfLiteTensor& tflite_tensor,
+                         TensorElementType& qt) {
+
+    switch (tflite_tensor.type) {
+        case kTfLiteFloat32:
+            qt = TensorElementType::FLOAT32;
+            break;
+        default:
+            return UnimplementedError("Tensor type not yet supported");
+    }
+
+    return OkStatus();
+}
+
 Status ConvertTfLiteTensorToTensorRef(const TfLiteTensor& tflite_tensor,
                                       TensorRef* tensor_ref) {
 
-    throw JintercException("ConvertTfLiteTensorToTensorRef not implemented");
+    if (tflite_tensor.type != kTfLiteFloat32)
+        return UnimplementedError(
+            "Jinterc currently only supporting FP32 tensors");
+
+    if (tensor_ref == nullptr) return InternalError("Null tensor pointer");
+
+    // -- for now...
+    //
     //   tensor_ref->type = ToDataType(tflite_tensor.type);
-    //   return ExtractTensorShape(tflite_tensor, &tensor_ref->shape);
+    tensor_ref->type = tabeq::model::TensorElementType::FLOAT32;
+
+    return ExtractTensorShape(tflite_tensor, tensor_ref->shape);
+}
+
+Status SetAllDimensions(const TfLiteIntArray* dimensions, TensorLayout layout,
+                        Shape& shape) {
+    if (dimensions->size < 0) {
+        return InvalidArgumentError("Invalid Scalar dimensions");
+    }
+
+    const int* d = dimensions->data;
+
+    switch (layout) {
+        case TensorLayout::HW:
+            shape.h(d[0]);
+            shape.w(d[1]);
+            break;
+        default:
+            return InvalidArgumentError("Unsupported layout");
+    }
+
+    return OkStatus();
 }
 
 class ObjectReader {
@@ -146,18 +238,17 @@ class ObjectReader {
         return OkStatus();
     }
 
-    template <typename TensorT>
-    Status ReadTensor(uint32_t idx, TensorT* t) const {
+    Status ReadTensor(uint32_t idx, TensorLayout layout, TabeqTensor* t) const {
         RETURN_IF_ERROR(CheckTensorIsAvailable(context_, tflite_node_, idx));
         const int32_t tensor_idx = tflite_node_->inputs->data[idx];
         const TfLiteTensor* tflite_tensor = context_->tensors + tensor_idx;
         t->data.resize(NumElements(tflite_tensor));
-        RETURN_IF_ERROR(CreateVectorCopyData(*tflite_tensor, &t->data[0]));
+        RETURN_IF_ERROR(CreateVectorCopyData(*tflite_tensor, t));
 
         // Axis and data layout depend on operation this tensor is used in. So,
         // postpone resolutions until operations are parsed.
         t->id = tensor_idx;
-        return SetAllDimensions(tflite_tensor->dims, &t->shape);
+        return SetAllDimensions(tflite_tensor->dims, layout, t->shape);
     }
 
     Status AddOutput(const Node* node, int id) {
@@ -233,11 +324,13 @@ Status GetFullyConnectedAttributes(int weights_tensor_id, int bias_tensor_id,
                                    ObjectReader* reader,
                                    FullyConnectedAttributes* attr) {
 
-#if 1
+    // Tensor<HW, DataType::FLOAT32> weights;
+    TabeqTensor weights;
+    RETURN_IF_ERROR(
+        reader->ReadTensor(weights_tensor_id, TensorLayout::HW, &weights));
+
     throw JintercException("GetFullyConnectedAttributes not supported");
-#else
-    Tensor<HW, DataType::FLOAT32> weights;
-    RETURN_IF_ERROR(reader->ReadTensor(weights_tensor_id, &weights));
+#if 0
     attr->weights.data = std::move(weights.data);
     attr->weights.id = weights.id;
     attr->weights.shape.h = 1;
@@ -245,8 +338,6 @@ Status GetFullyConnectedAttributes(int weights_tensor_id, int bias_tensor_id,
     attr->weights.shape.o = weights.shape.h;
     attr->weights.shape.i = weights.shape.w;
     reader->ReadTensor(bias_tensor_id, &attr->bias).IgnoreError();  // optional
-
-    return OkStatus();
 #endif
 }
 
@@ -503,9 +594,10 @@ bool IsAllFloatTensors(const TfLiteContext* context,
 
         bool const type_supported = (t->type == kTfLiteFloat32);
 
-        if (t->allocation_type == kTfLiteArenaRw && !type_supported) {
-            return false;
-        }
+        // if (t->allocation_type == kTfLiteArenaRw && !type_supported) {
+        //     return false;
+        // }
+        if (!type_supported) return false;
     }
     return true;
 }
