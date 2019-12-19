@@ -40,7 +40,7 @@ limitations under the License.
 
 #if 0
 #include "tensorflow/lite/delegates/gpu/common/data_type.h"
-#include "tensorflow/lite/delegates/gpu/common/model.h"
+#include "tensorflow/lite/delegates/gpu/common/"
 #include "tensorflow/lite/delegates/gpu/common/operations.h"
 #include "tensorflow/lite/delegates/gpu/common/shape.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
@@ -54,10 +54,9 @@ limitations under the License.
 namespace tflite {
 namespace tabeq {
 
-using namespace ::tabeq::model;
 using namespace ::tabeq;
 
-using TabeqTensor = ::tabeq::model::Tensor;
+using TabeqTensor = ::tabeq::Tensor;
 
 int GetNumberOfRuntimeInputsForNode(const TfLiteContext* context,
                                     const TfLiteNode* tflite_node) {
@@ -87,9 +86,9 @@ Status CheckTensorIsAvailable(const TfLiteContext* context,
                               const TfLiteNode* tflite_node, int idx) {
     // If tensor id is in range, it's guaranteed that it'll be available.
     if (idx >= tflite_node->inputs->size) {
-        return OutOfRangeError(absl::StrFormat(
-            "Requested index goes beyond array size (%d vs %d).", idx,
-            tflite_node->inputs->data[idx]));
+        LFSTRM(msg) << "Requested index goes beyond array size (" << idx
+                    << " vs " << tflite_node->inputs->data[idx] << ").";
+        return OutOfRangeError(LFSTR(msg));
     }
     return OkStatus();
 }
@@ -98,48 +97,39 @@ Status CheckMaxSupportedOpVersion(const TfLiteRegistration* registration,
                                   int max_version) {
     const int op_version = registration->version;
     if (op_version > max_version) {
-        return UnimplementedError(
-            absl::StrFormat("Max version supported: %d. Requested version %d.",
-                            max_version, op_version));
+        LFSTRM(msg) << "Max version supported: " << max_version
+                    << ". Requested version " << op_version;
+        return UnimplementedError(LFSTR(msg));
     }
+
     return OkStatus();
 }
 
-
 /**
- * TODO: Fix this incorrect stuff.
+ * Extract tensor into BHWC shape.
  */
 Status ExtractTensorShape(const TfLiteTensor& tflite_tensor, Shape& shape) {
 
-    printf("TODO: Figure out tensor layouts");
-
-    shape.layout = tabeq::model::TensorLayout::BHWC;
+    shape.layout = tabeq::Layout::BHWC;
 
     const int* d = tflite_tensor.dims->data;
 
-    shape.dims = {1, 1, 1, 1};
-
     switch (tflite_tensor.dims->size) {
         case 1:
-            shape.w(d[0]);
+            shape.dims = {d[0], 1, 1, 1};
             break;
 
         case 2:
-            shape.h(d[0]);
-            shape.w(d[1]);
+            shape.dims = {d[0], 1, 1, d[1]};
             break;
 
         case 3:
-            shape.h(d[0]);
-            shape.w(d[1]);
-            shape.c(d[2]);
+            shape.dims = {d[0], 1, d[1], d[2]};
             break;
 
         case 4:
-            shape.b(d[0]);
-            shape.h(d[1]);
-            shape.w(d[2]);
-            shape.c(d[3]);
+            shape.dims = {d[0], d[1], d[2], d[3]};
+
             break;
 
         default:
@@ -178,28 +168,118 @@ Status ConvertTfLiteTensorToTensorRef(const TfLiteTensor& tflite_tensor,
     // -- for now...
     //
     //   tensor_ref->type = ToDataType(tflite_tensor.type);
-    tensor_ref->type = tabeq::model::TensorElementType::FLOAT32;
+    tensor_ref->type = tabeq::TensorElementType::FLOAT32;
 
     return ExtractTensorShape(tflite_tensor, tensor_ref->shape);
 }
 
-Status SetAllDimensions(const TfLiteIntArray* dimensions, TensorLayout layout,
-                        Shape& shape) {
+Status CheckUnityDimensions(const TfLiteIntArray* dimensions) {
+
     if (dimensions->size < 0) {
-        return InvalidArgumentError("Invalid Scalar dimensions");
+        return InvalidArgumentError("Invalid Dimension Size");
     }
 
+    for (int i = 0; i < dimensions->size - 1; ++i) {
+        if (dimensions->data[i] != 1) {
+            LFSTRM(msg) << "Found dimension size " << dimensions->data[i]
+                        << " when expecting 1";
+
+            return InvalidArgumentError(LFSTR(msg));
+        }
+    }
+
+    return OkStatus();
+}
+
+Status SetAllDimensions(const TfLiteIntArray* dimensions, Layout layout,
+                        Shape& shape) {
+
     const int* d = dimensions->data;
+    int dsz = dimensions->size;
+
+    shape.initDims();
+    shape.layout = layout;
 
     switch (layout) {
-        case TensorLayout::HW:
+
+        case Layout::SCALAR:
+            RETURN_IF(dsz < 0,
+                      InvalidArgumentError("Invalid Scalar dimensions"));
+            RETURN_IF_ERROR(CheckUnityDimensions(dimensions));
+            shape.v(1);  // -- scalar is vector of length 1
+            break;
+
+        case Layout::LINEAR:
+            RETURN_IF(dsz <= 0, InvalidArgumentError("Dimension is empty."));
+            RETURN_IF_ERROR(CheckUnityDimensions(dimensions));
+            shape.v(d[dsz - 1]);
+            break;
+
+        case Layout::HWC:
+            RETURN_IF(d[0] != 4, UnimplementedError("Dimensions are not HWC"));
+            RETURN_IF(d[0] != 1,
+                      UnimplementedError("Batch size is not equal to 1."));
+            shape.h(d[1]);
+            shape.w(d[2]);
+            shape.c(d[3]);
+            break;
+
+        case Layout::HW:
+            RETURN_IF(dsz != 2, InvalidArgumentError("Dimensions are not HW"));
             shape.h(d[0]);
             shape.w(d[1]);
             break;
+
+        case Layout::OHWI:
+            RETURN_IF(dsz != 4,
+                      InvalidArgumentError("Dimensions are not OHWI"));
+            shape.o(d[0]);
+            shape.h(d[1]);
+            shape.w(d[2]);
+            shape.i(d[3]);
+            break;
+
+        case Layout::IHWO:
+            RETURN_IF(dsz != 4,
+                      InvalidArgumentError("Dimensions are not IHWO"));
+            shape.i(d[0]);
+            shape.h(d[1]);
+            shape.w(d[2]);
+            shape.o(d[3]);
+            break;
+
+        case Layout::BHWC:
+            RETURN_IF(dsz != 4,
+                      InvalidArgumentError("Dimensions are not BHWC"));
+            shape.b(d[0]);
+            shape.h(d[1]);
+            shape.w(d[2]);
+            shape.c(d[3]);
+            break;
+
         default:
             return InvalidArgumentError("Unsupported layout");
     }
 
+    return OkStatus();
+}
+
+Status CreateVectorCopyData(const TfLiteTensor& tensor, TabeqTensor& qt) {
+
+    ConvertTensorType(tensor, qt.type);
+
+    int esz = qt.elementSize();
+    int sz = NumElements(&tensor) * esz;
+
+    if (tensor.bytes % esz != 0) {
+        return InvalidArgumentError(
+            absl::StrCat("Input data size ", tensor.bytes,
+                         " is not aligned to expected type: ", esz));
+    }
+
+    qt.data.resize(sz);
+
+    std::memcpy(&qt.data[0], tensor.data.uint8, sz);
     return OkStatus();
 }
 
@@ -238,15 +318,15 @@ class ObjectReader {
         return OkStatus();
     }
 
-    Status ReadTensor(uint32_t idx, TensorLayout layout, TabeqTensor* t) const {
+    Status ReadTensor(uint32_t idx, Layout layout, TabeqTensor* t) const {
         RETURN_IF_ERROR(CheckTensorIsAvailable(context_, tflite_node_, idx));
         const int32_t tensor_idx = tflite_node_->inputs->data[idx];
         const TfLiteTensor* tflite_tensor = context_->tensors + tensor_idx;
-        t->data.resize(NumElements(tflite_tensor));
-        RETURN_IF_ERROR(CreateVectorCopyData(*tflite_tensor, t));
 
-        // Axis and data layout depend on operation this tensor is used in. So,
-        // postpone resolutions until operations are parsed.
+        RETURN_IF_ERROR(CreateVectorCopyData(*tflite_tensor, *t));
+
+        // Axis and data layout depend on operation this tensor is used in.
+        // So, postpone resolutions until operations are parsed.
         t->id = tensor_idx;
         return SetAllDimensions(tflite_tensor->dims, layout, t->shape);
     }
@@ -318,27 +398,23 @@ class ObjectReader {
     std::vector<Value<TensorRef>*>* tensor_to_value_;
 };
 
-typedef int FullyConnectedAttributes;
-
 Status GetFullyConnectedAttributes(int weights_tensor_id, int bias_tensor_id,
                                    ObjectReader* reader,
                                    FullyConnectedAttributes* attr) {
 
     // Tensor<HW, DataType::FLOAT32> weights;
     TabeqTensor weights;
-    RETURN_IF_ERROR(
-        reader->ReadTensor(weights_tensor_id, TensorLayout::HW, &weights));
 
-    throw JintercException("GetFullyConnectedAttributes not supported");
-#if 0
+    RETURN_IF_ERROR(
+        reader->ReadTensor(weights_tensor_id, Layout::HW, &weights));
+
     attr->weights.data = std::move(weights.data);
     attr->weights.id = weights.id;
-    attr->weights.shape.h = 1;
-    attr->weights.shape.w = 1;
-    attr->weights.shape.o = weights.shape.h;
-    attr->weights.shape.i = weights.shape.w;
-    reader->ReadTensor(bias_tensor_id, &attr->bias).IgnoreError();  // optional
-#endif
+
+    reader->ReadTensor(bias_tensor_id, Layout::LINEAR, &attr->bias)
+        .IgnoreError();  // optional
+
+    return OkStatus();
 }
 
 template <typename ParamsT>
@@ -353,13 +429,14 @@ Status RetrieveBuiltinData(const TfLiteNode* tflite_node,
     return OkStatus();
 }
 
-// A parser responsible for parsing TFLite operation and adding it to a graph.
+// A parser responsible for parsing TFLite operation and adding it to a
+// graph.
 class TFLiteOperationParser {
    public:
     virtual ~TFLiteOperationParser() = default;
 
-    // Parses TFLite operation. This method allows expanding fused operations
-    // into more than one node.
+    // Parses TFLite operation. This method allows expanding fused
+    // operations into more than one node.
     virtual Status Parse(const TfLiteNode* tflite_node,
                          const TfLiteRegistration* registration,
                          TabeqGraph* graph, ObjectReader* reader) = 0;
@@ -390,6 +467,7 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
     Status Parse(const TfLiteNode* tflite_node,
                  const TfLiteRegistration* registration, TabeqGraph* graph,
                  ObjectReader* reader) final {
+                     
         Node* node = graph->NewNode();
         RETURN_IF_ERROR(reader->AddInput(node, 0));
 
@@ -405,29 +483,26 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         FullyConnectedAttributes attr;
         RETURN_IF_ERROR(GetFullyConnectedAttributes(1, 2, reader, &attr));
 
-#if 1
-        throw JintercException("FC Parse is WIP");
-#else
         // Tensor<HW, DataType::FLOAT32> weights;
-        TensorRef weights;
-        RETURN_IF_ERROR(reader->ReadTensor(1, &weights));
+        TabeqTensor weights;
+        RETURN_IF_ERROR(reader->ReadTensor(1, Layout::HW, &weights));
         auto input = graph->FindInputs(node->id)[0];
-        int batch_size = input->tensor.shape.b;
+        int batch_size = input->tensor.shape.b();
         if (input->tensor.shape.DimensionsProduct() / batch_size !=
-            weights.shape.w) {
+            weights.shape.w()) {
             return UnimplementedError(
                 "Amount of input data should match weights width");
         }
 
         Node* conv = node;
-        if (input->tensor.shape.h != 1 || input->tensor.shape.w != 1) {
+        if (input->tensor.shape.h() != 1 || input->tensor.shape.w() != 1) {
             auto& reshape = node;
             conv = graph->NewNode();  // reset conv pointer!
             Value<TensorRef>* reshaped_value = graph->NewValue();
-            reshaped_value->tensor.shape = BHWC(1, 1, 1, weights.shape.w);
+            reshaped_value->tensor.shape = BHWC(1, 1, 1, weights.shape.w());
             RETURN_IF_ERROR(
                 graph->SetProducer(reshape->id, reshaped_value->id));
-            reshape->operation.type = ToString(OperationType::RESHAPE);
+            reshape->operation.type = tabeq::ToString(OperationType::RESHAPE);
             ReshapeAttributes attr;
             attr.new_shape = reshaped_value->tensor.shape;
             reshape->operation.attributes = attr;
@@ -437,11 +512,12 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         conv->operation.type = ToString(OperationType::FULLY_CONNECTED);
         conv->operation.attributes = std::move(attr);
         Status result = reader->AddOutputs(conv);
-        RETURN_IF_ERROR(MaybeFuseActivationToTheSingleOutput(
-            tf_options->activation, graph, conv));
+
+        // -- TODO: Add this
+        // RETURN_IF_ERROR(MaybeFuseActivationToTheSingleOutput(
+        //     tf_options->activation, graph, conv));
 
         return result;
-#endif
     }
 };
 

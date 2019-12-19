@@ -19,15 +19,28 @@ limitations under the License.
 #include <string>
 
 #include <tabeq/model.h>
+#include <tabeq/operations.h>
+
 #include "tensorflow/lite/context.h"
+
+#include <sstream>
+
+// -- Helper defs for line and file
+//
+#define LFSTRM(msg)         \
+    std::ostringstream msg; \
+    msg << __FILE__ << ":" << __LINE__ << " -> "
+
+#define LFCHAR(msg) msg.str().c_str()
+#define LFSTR(msg) msg.str()
 
 namespace tflite {
 namespace tabeq {
 
 using Status = ::tabeq::Status;
-using TabeqGraph = ::tabeq::model::TabeqGraph;
-using TensorRef = ::tabeq::model::TensorRef;
-using Node = ::tabeq::model::Node;
+using TabeqGraph = ::tabeq::TabeqGraph;
+using TensorRef = ::tabeq::TensorRef;
+using Node = ::tabeq::Node;
 
 // Validates which operations are supported and returns array of operations to
 // replace with GPU kernels. The caller must free the pointer on TfLiteIntArray.
