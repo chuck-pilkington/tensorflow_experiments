@@ -39,8 +39,8 @@ limitations under the License.
 #include "tensorflow/lite/context.h"
 
 #if 0
-#include "tensorflow/lite/delegates/gpu/common/data_type.h"
 #include "tensorflow/lite/delegates/gpu/common/"
+#include "tensorflow/lite/delegates/gpu/common/data_type.h"
 #include "tensorflow/lite/delegates/gpu/common/operations.h"
 #include "tensorflow/lite/delegates/gpu/common/shape.h"
 #include "tensorflow/lite/delegates/gpu/common/status.h"
@@ -116,19 +116,19 @@ Status ExtractTensorShape(const TfLiteTensor& tflite_tensor, Shape& shape) {
 
     switch (tflite_tensor.dims->size) {
         case 1:
-            shape.dims = {d[0], 1, 1, 1};
+            shape.setDimensions({d[0], 1, 1, 1});
             break;
 
         case 2:
-            shape.dims = {d[0], 1, 1, d[1]};
+            shape.setDimensions({d[0], 1, 1, d[1]});
             break;
 
         case 3:
-            shape.dims = {d[0], 1, d[1], d[2]};
+            shape.setDimensions({d[0], 1, d[1], d[2]});
             break;
 
         case 4:
-            shape.dims = {d[0], d[1], d[2], d[3]};
+            shape.setDimensions({d[0], d[1], d[2], d[3]});
 
             break;
 
@@ -197,7 +197,7 @@ Status SetAllDimensions(const TfLiteIntArray* dimensions, Layout layout,
     const int* d = dimensions->data;
     int dsz = dimensions->size;
 
-    shape.initDims();
+    shape.init();
     shape.layout = layout;
 
     switch (layout) {
@@ -206,55 +206,55 @@ Status SetAllDimensions(const TfLiteIntArray* dimensions, Layout layout,
             RETURN_IF(dsz < 0,
                       InvalidArgumentError("Invalid Scalar dimensions"));
             RETURN_IF_ERROR(CheckUnityDimensions(dimensions));
-            shape.v(1);  // -- scalar is vector of length 1
+            shape.v = 1;  // -- scalar is vector of length 1
             break;
 
         case Layout::LINEAR:
             RETURN_IF(dsz <= 0, InvalidArgumentError("Dimension is empty."));
             RETURN_IF_ERROR(CheckUnityDimensions(dimensions));
-            shape.v(d[dsz - 1]);
+            shape.v = d[dsz - 1];
             break;
 
         case Layout::HWC:
             RETURN_IF(d[0] != 4, UnimplementedError("Dimensions are not HWC"));
             RETURN_IF(d[0] != 1,
                       UnimplementedError("Batch size is not equal to 1."));
-            shape.h(d[1]);
-            shape.w(d[2]);
-            shape.c(d[3]);
+            shape.h = d[1];
+            shape.w = d[2];
+            shape.c = d[3];
             break;
 
         case Layout::HW:
             RETURN_IF(dsz != 2, InvalidArgumentError("Dimensions are not HW"));
-            shape.h(d[0]);
-            shape.w(d[1]);
+            shape.h = d[0];
+            shape.w = d[1];
             break;
 
         case Layout::OHWI:
             RETURN_IF(dsz != 4,
                       InvalidArgumentError("Dimensions are not OHWI"));
-            shape.o(d[0]);
-            shape.h(d[1]);
-            shape.w(d[2]);
-            shape.i(d[3]);
+            shape.o = d[0];
+            shape.h = d[1];
+            shape.w = d[2];
+            shape.i = d[3];
             break;
 
         case Layout::IHWO:
             RETURN_IF(dsz != 4,
                       InvalidArgumentError("Dimensions are not IHWO"));
-            shape.i(d[0]);
-            shape.h(d[1]);
-            shape.w(d[2]);
-            shape.o(d[3]);
+            shape.i = d[0];
+            shape.h = d[1];
+            shape.w = d[2];
+            shape.o = d[3];
             break;
 
         case Layout::BHWC:
             RETURN_IF(dsz != 4,
                       InvalidArgumentError("Dimensions are not BHWC"));
-            shape.b(d[0]);
-            shape.h(d[1]);
-            shape.w(d[2]);
-            shape.c(d[3]);
+            shape.b = d[0];
+            shape.h = d[1];
+            shape.w = d[2];
+            shape.c = d[3];
             break;
 
         default:
@@ -467,7 +467,7 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
     Status Parse(const TfLiteNode* tflite_node,
                  const TfLiteRegistration* registration, TabeqGraph* graph,
                  ObjectReader* reader) final {
-                     
+
         Node* node = graph->NewNode();
         RETURN_IF_ERROR(reader->AddInput(node, 0));
 
@@ -487,19 +487,19 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         TabeqTensor weights;
         RETURN_IF_ERROR(reader->ReadTensor(1, Layout::HW, &weights));
         auto input = graph->FindInputs(node->id)[0];
-        int batch_size = input->tensor.shape.b();
+        int batch_size = input->tensor.shape.b;
         if (input->tensor.shape.DimensionsProduct() / batch_size !=
-            weights.shape.w()) {
+            weights.shape.w) {
             return UnimplementedError(
                 "Amount of input data should match weights width");
         }
 
         Node* conv = node;
-        if (input->tensor.shape.h() != 1 || input->tensor.shape.w() != 1) {
+        if (input->tensor.shape.h != 1 || input->tensor.shape.w != 1) {
             auto& reshape = node;
             conv = graph->NewNode();  // reset conv pointer!
             Value<TensorRef>* reshaped_value = graph->NewValue();
-            reshaped_value->tensor.shape = BHWC(1, 1, 1, weights.shape.w());
+            reshaped_value->tensor.shape = BHWC(1, 1, 1, weights.shape.w);
             RETURN_IF_ERROR(
                 graph->SetProducer(reshape->id, reshaped_value->id));
             reshape->operation.type = tabeq::ToString(OperationType::RESHAPE);
@@ -749,7 +749,6 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context) {
     return subgraph;
 }
 
-#if 1
 Status BuildModel(TfLiteContext* context,
                   const TfLiteDelegateParams* delegate_params,
                   TabeqGraph* graph) {
@@ -797,7 +796,6 @@ Status BuildModel(TfLiteContext* context,
     }
     return OkStatus();
 }
-#endif
 
 }  // namespace tabeq
 }  // namespace tflite

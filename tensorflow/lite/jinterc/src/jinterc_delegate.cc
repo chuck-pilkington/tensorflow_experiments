@@ -45,8 +45,7 @@ namespace tflite {
 namespace jinterc {
 
 using namespace ::tflite::tabeq;
-
-using Status = tabeq::Status;
+using namespace ::tabeq;
 
 InferencePriority ToPriority(int32_t priority) {
     switch (priority) {
@@ -90,12 +89,8 @@ class Delegate {
     Status Prepare(TfLiteContext* context,
                    const TfLiteDelegateParams* delegate_params) {
 
-#if 0
-        throw JintercException(
-            "Unsupported Jinterc Delegate 'Prepare' method called");
-#else
         // Extract TFLite delegate execution plan from the context and convert
-        // it into FlowGraph32.
+        // it into a TabeqGraph.
         TabeqGraph graph;
         RETURN_IF_ERROR(BuildModel(context, delegate_params, &graph));
 
@@ -125,15 +120,18 @@ class Delegate {
             }
         }
 
+        std::unique_ptr<::tabeq::InferenceBuilder> builder;
+
+        RETURN_IF_ERROR(::tabeq::InitializeBuilder(&graph, &builder));
+
 #if 0
-        std::unique_ptr<InferenceBuilder> builder;
         Status status = InitializeOpenClApi(&graph, &builder);
         if (!status.ok()) {
             context->ReportError(context, "%s", status.error_message().c_str());
             context->ReportError(context, "Falling back to OpenGL");
             RETURN_IF_ERROR(InitializeOpenGlApi(&graph, &builder));
         }
-
+#endif
 
         // At this point tflite didn't allocate tensors yet, therefore, collect
         // indices and set all input and output tensors from tflite later.
@@ -151,15 +149,8 @@ class Delegate {
             RETURN_IF_ERROR(builder->SetOutputObjectDef(
                 object_index, GetObjectDef(tensor_index)));
         }
-#endif
 
-#if 1
-    throw JintercException("Need to implement tabeq builder");
-#else
         return builder->Build(&runner_);
-#endif
-
-#endif
     }
 
     Status SetInputsAndOutputs(TfLiteContext* context) {
@@ -192,8 +183,6 @@ class Delegate {
 #endif
     }
 
-#if 0
-
     ObjectDef GetObjectDef(int index) const {
         ObjectDef default_object_def;
         default_object_def.data_type = DataType::FLOAT32;
@@ -202,76 +191,16 @@ class Delegate {
         default_object_def.user_provided = true;
         return default_object_def;
     }
-#endif
 
-#if 0
     TensorObject GetTensorObject(int index, TfLiteContext* context) const {
         auto& tensor = context->tensors[index];
-        return MakeCpuMemory(absl::MakeSpan(tensor.data.raw, tensor.bytes));
+
+        return TensorObject(tensor.data.raw, tensor.bytes);
     }
-#endif
 
     TfLiteDelegate* tflite_delegate() { return &delegate_; }
 
    private:
-
-#if 0
-
-    Status InitializeOpenClApi(GraphFloat32* graph,
-                               std::unique_ptr<InferenceBuilder>* builder) {
-        cl::InferenceEnvironmentOptions env_options;
-        cl::InferenceEnvironmentProperties properties;
-        RETURN_IF_ERROR(cl::NewInferenceEnvironment(
-            env_options, &cl_environment_, &properties));
-        cl::InferenceOptions options;
-        // If is_precision_loss_allowed == -1, then just use priorities instead
-        // of paying attention to is_precision_loss_allowed value.
-        if (options_.is_precision_loss_allowed == -1) {
-            options.priority1 = ToPriority(options_.inference_priority1);
-            options.priority2 = ToPriority(options_.inference_priority2);
-            options.priority3 = ToPriority(options_.inference_priority3);
-        } else {
-            // Users set is_precision_loss_allowed explicitly, thus use it
-            // explicitly.
-            if (options_.is_precision_loss_allowed == 0) {
-                options.priority1 = InferencePriority::MAX_PRECISION;
-                options.priority2 = InferencePriority::MIN_MEMORY_USAGE;
-                options.priority3 = InferencePriority::MIN_LATENCY;
-            } else {
-                options.priority1 = InferencePriority::MIN_LATENCY;
-                options.priority2 = InferencePriority::MIN_MEMORY_USAGE;
-                options.priority3 = InferencePriority::MAX_PRECISION;
-            }
-        }
-        options.usage = ToUsage(options_.inference_preference);
-        RETURN_IF_ERROR(cl_environment_->NewInferenceBuilder(
-            options, std::move(*graph), builder));
-        TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
-                             "Initialized OpenCL-based API.");
-        return OkStatus();
-    }
-
-
-    Status InitializeOpenGlApi(GraphFloat32* graph,
-                               std::unique_ptr<InferenceBuilder>* builder) {
-        gl::InferenceEnvironmentOptions env_options;
-        gl::InferenceEnvironmentProperties properties;
-        RETURN_IF_ERROR(NewInferenceEnvironment(env_options, &gl_environment_,
-                                                &properties));
-        gl::InferenceOptions options;
-        options.usage = ToUsage(options_.inference_preference);
-        options.priority1 = ToPriority(options_.inference_priority1);
-        options.priority2 = ToPriority(options_.inference_priority2);
-        options.priority3 = ToPriority(options_.inference_priority3);
-        RETURN_IF_ERROR(gl_environment_->NewInferenceBuilder(std::move(*graph),
-                                                             options, builder));
-        TFLITE_LOG_PROD_ONCE(tflite::TFLITE_LOG_INFO,
-                             "Initialized OpenGL-based API.");
-        return OkStatus();
-    }
-
-#endif
-
     TfLiteDelegate delegate_ = {
         reinterpret_cast<void*>(this),  // .data_
         DelegatePrepare,                // .Prepare
@@ -283,11 +212,8 @@ class Delegate {
 
     TfLiteJintercDelegateOptions options_;
 
-#if 0
-    std::unique_ptr<cl::InferenceEnvironment> cl_environment_;
-    std::unique_ptr<gl::InferenceEnvironment> gl_environment_;
     std::unique_ptr<InferenceRunner> runner_;
-#endif
+
     std::vector<int64_t> input_indices_;
     std::vector<int64_t> output_indices_;
 };
@@ -343,10 +269,10 @@ TfLiteStatus DelegatePrepare(TfLiteContext* context, TfLiteDelegate* delegate) {
             }
             return kTfLiteOk;
         },
-        nullptr,                    // .profiling_string
-        0,                          // .builtin_code
+        nullptr,                  // .profiling_string
+        0,                        // .builtin_code
         "TfLiteJintercDelegate",  // .custom_name
-        1,                          // .version
+        1,                        // .version
     };
     TfLiteIntArray* ops_to_replace = GetOpsToReplace(context);
     const auto status = context->ReplaceNodeSubsetsWithDelegateKernels(

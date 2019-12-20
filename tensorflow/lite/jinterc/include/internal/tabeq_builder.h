@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <tabeq/model.h>
 #include <tabeq/operations.h>
+#include <tabeq/lower.h>
 
 #include "tensorflow/lite/context.h"
 
