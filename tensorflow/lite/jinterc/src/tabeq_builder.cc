@@ -752,8 +752,10 @@ TfLiteIntArray* GetOpsToReplace(TfLiteContext* context) {
 Status BuildModel(TfLiteContext* context,
                   const TfLiteDelegateParams* delegate_params,
                   TabeqGraph* graph) {
+
     std::vector<std::unique_ptr<TFLiteOperationParser>> operations;
     std::vector<int> tflite_nodes;
+
     for (int i = 0; i < delegate_params->nodes_to_replace->size; ++i) {
         TfLiteNode* tflite_node = nullptr;
         TfLiteRegistration* registration = nullptr;
