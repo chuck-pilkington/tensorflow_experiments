@@ -122,7 +122,7 @@ class Delegate {
 
         std::unique_ptr<::tabeq::InferenceBuilder> builder;
 
-        RETURN_IF_ERROR(::tabeq::InitializeBuilder(&graph, &builder));
+        RETURN_IF_ERROR(::tabeq::InitializeBuilder(std::move(graph), &builder));
 
 #if 0
         Status status = InitializeOpenClApi(&graph, &builder);
@@ -154,10 +154,7 @@ class Delegate {
     }
 
     Status SetInputsAndOutputs(TfLiteContext* context) {
-#if 1
-        throw JintercException(
-            "Jinterc 'SetInputsAndOutputs' method not yet implemented");
-#else
+
         int i = 0;
         for (auto index : input_indices_) {
             RETURN_IF_ERROR(
@@ -170,17 +167,12 @@ class Delegate {
         }
 
         return OkStatus();
-#endif
     }
 
     Status Invoke(TfLiteContext* context) {
         RETURN_IF_ERROR(SetInputsAndOutputs(context));
-#if 1
-        throw JintercException("Jinterc 'Invoke' method not yet implemented");
-#else
 
         return runner_->Run();
-#endif
     }
 
     ObjectDef GetObjectDef(int index) const {

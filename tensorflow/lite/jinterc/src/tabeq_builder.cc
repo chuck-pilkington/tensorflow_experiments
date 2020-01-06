@@ -483,11 +483,16 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         FullyConnectedAttributes attr;
         RETURN_IF_ERROR(GetFullyConnectedAttributes(1, 2, reader, &attr));
 
-        // Tensor<HW, DataType::FLOAT32> weights;
-        TabeqTensor weights;
-        RETURN_IF_ERROR(reader->ReadTensor(1, Layout::HW, &weights));
+        // -- CEP: Why read these again?
+        //
+        // TabeqTensor weights;
+        // RETURN_IF_ERROR(reader->ReadTensor(1, Layout::HW, &weights));
+        
+        TabeqTensor &weights = attr.weights;
+
         auto input = graph->FindInputs(node->id)[0];
         int batch_size = input->tensor.shape.b;
+        
         if (input->tensor.shape.DimensionsProduct() / batch_size !=
             weights.shape.w) {
             return UnimplementedError(
@@ -771,7 +776,7 @@ Status BuildModel(TfLiteContext* context,
             return UnimplementedError(
                 absl::StrCat("Operation ", registration->builtin_code, "(",
                              registration->custom_name,
-                             ") is not supported by TFLite GPU Delegate."));
+                             ") is not supported by Jinterc Delegate."));
         }
         operations.push_back(std::move(op_parser));
         tflite_nodes.push_back(i);
