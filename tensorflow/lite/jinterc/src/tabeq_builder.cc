@@ -402,14 +402,8 @@ Status GetFullyConnectedAttributes(int weights_tensor_id, int bias_tensor_id,
                                    ObjectReader* reader,
                                    FullyConnectedAttributes* attr) {
 
-    // Tensor<HW, DataType::FLOAT32> weights;
-    TabeqTensor weights;
-
     RETURN_IF_ERROR(
-        reader->ReadTensor(weights_tensor_id, Layout::HW, &weights));
-
-    attr->weights.data = std::move(weights.data);
-    attr->weights.id = weights.id;
+        reader->ReadTensor(weights_tensor_id, Layout::HW, &attr->weights));
 
     reader->ReadTensor(bias_tensor_id, Layout::LINEAR, &attr->bias)
         .IgnoreError();  // optional
@@ -487,12 +481,12 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         //
         // TabeqTensor weights;
         // RETURN_IF_ERROR(reader->ReadTensor(1, Layout::HW, &weights));
-        
-        TabeqTensor &weights = attr.weights;
+
+        TabeqTensor& weights = attr.weights;
 
         auto input = graph->FindInputs(node->id)[0];
         int batch_size = input->tensor.shape.b;
-        
+
         if (input->tensor.shape.DimensionsProduct() / batch_size !=
             weights.shape.w) {
             return UnimplementedError(
