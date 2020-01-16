@@ -20,6 +20,9 @@ limitations under the License.
 #include <vector>
 
 #include <tabeq/status.h>
+#include <tabeq/model_transformer.h>
+#include <tabeq/general_transformations.h>
+
 #include "tensorflow/lite/builtin_ops.h"
 
 #include "tensorflow/lite/jinterc/include/jinterc.h"
@@ -94,14 +97,12 @@ class Delegate {
         TabeqGraph graph;
         RETURN_IF_ERROR(BuildModel(context, delegate_params, &graph));
 
-#if 0
         // Apply general transformations on the graph.
         NullTransformationReporter reporter;
         ModelTransformer transformer(&graph, &reporter);
         if (!ApplyGeneralTransformations(&transformer)) {
             return InternalError("Graph general transformations failed");
         }
-#endif
 
         std::vector<uint32_t> input_refs;
         {
