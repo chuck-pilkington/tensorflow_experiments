@@ -19,9 +19,9 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include <tabeq/status.h>
 #include <tabeq/model_transformer.h>
-#include <tabeq/general_transformations.h>
+#include <tabeq/status.h>
+#include <tabeq/transformations.h>
 
 #include "tensorflow/lite/builtin_ops.h"
 
@@ -97,11 +97,21 @@ class Delegate {
         TabeqGraph graph;
         RETURN_IF_ERROR(BuildModel(context, delegate_params, &graph));
 
-        // Apply general transformations on the graph.
+        // First apply general transformations on the graph.
         NullTransformationReporter reporter;
         ModelTransformer transformer(&graph, &reporter);
+
         if (!ApplyGeneralTransformations(&transformer)) {
             return InternalError("Graph general transformations failed");
+        }
+
+        // -- Next do Tabeq-specific transformations
+        //
+        DebugTransformationReporter debugReporter;
+        ModelTransformer tabeqTransformer(&graph, &debugReporter);
+
+        if (!ApplyTabeqTransformations(&tabeqTransformer)) {
+            return InternalError("Graph Tabeq transformations failed");
         }
 
         std::vector<uint32_t> input_refs;
