@@ -58,6 +58,28 @@ using namespace ::tabeq;
 
 using TabeqTensor = ::tabeq::Tensor;
 
+// Creates a node that consumes output from the given node. Because output need
+// to stay the same, newly created node will inherit the output from the given
+// node, which will in turn get newly created copy of output. This is necessary
+// to preserve reference consistency if another node was pointing at that
+// output:
+//   node(output)
+// will turn into:
+//   node(copy(output)) <- passthrough_node(output)
+Status NewPassthroughNode(TabeqGraph* graph, Node* node,
+                          const Value<TensorRef>* output,
+                          Node** passthru_node) {
+    *passthru_node = graph->NewNode();
+    // Make copies for every output in the original node.
+    RETURN_IF_ERROR(graph->SetProducer((*passthru_node)->id, output->id));
+    Value<TensorRef>* copy_output = graph->NewValue();
+    RETURN_IF_ERROR(graph->SetProducer(node->id, copy_output->id));
+    RETURN_IF_ERROR(graph->AddConsumer((*passthru_node)->id, copy_output->id));
+    copy_output->tensor = output->tensor;
+    copy_output->tensor.ref = -1;
+    return OkStatus();
+}
+
 int GetNumberOfRuntimeInputsForNode(const TfLiteContext* context,
                                     const TfLiteNode* tflite_node) {
     int number_of_runtime_inputs = 0;
@@ -423,6 +445,27 @@ Status RetrieveBuiltinData(const TfLiteNode* tflite_node,
     return OkStatus();
 }
 
+Status CheckInputsOutputs(const TfLiteContext* context,
+                          const TfLiteNode* tflite_node, int inputs,
+                          int outputs) {
+    int runtime_inputs = GetNumberOfRuntimeInputsForNode(context, tflite_node);
+    if (runtime_inputs != inputs) {
+        return InternalError(absl::StrFormat(
+            "Expected %d input tensor(s), but node has %d runtime "
+            "input(s).",
+            inputs, runtime_inputs));
+    }
+    int runtime_outputs =
+        GetNumberOfRuntimeOutputsForNode(context, tflite_node);
+    if (runtime_outputs != outputs) {
+        return InternalError(absl::StrFormat(
+            "Expected %d output tensor(s), but node has %d runtime "
+            "output(s).",
+            outputs, runtime_outputs));
+    }
+    return OkStatus();
+}
+
 // A parser responsible for parsing TFLite operation and adding it to a
 // graph.
 class TFLiteOperationParser {
@@ -439,6 +482,232 @@ class TFLiteOperationParser {
     virtual Status IsSupported(const TfLiteContext* context,
                                const TfLiteNode* tflite_node,
                                const TfLiteRegistration* registration) = 0;
+};
+
+Status IsActivationSupported(TfLiteFusedActivation fused_activation) {
+    switch (fused_activation) {
+        case kTfLiteActNone:
+        case kTfLiteActRelu:
+        case kTfLiteActRelu1:
+        case kTfLiteActRelu6:
+        case kTfLiteActTanh:
+            return OkStatus();
+        case kTfLiteActSignBit:
+            return UnimplementedError(
+                "TfLiteFusedActivation.kTfLiteActSignBit");
+        case kTfLiteActSigmoid:
+            return UnimplementedError(
+                "TfLiteFusedActivation.kTfLiteActSigmoid");
+
+            // Do not add default; we want compilation error rather than
+            // run-time error.
+    }
+}
+
+// If there is fused activation present, then there will be another node created
+// that will have identical output as the given node. New operation node will
+// depend on the given node output.
+Status MaybeFuseActivation(TfLiteFusedActivation fused_activation,
+                           const std::vector<uint32_t>& output_indices,
+                           TabeqGraph* graph, Node* node) {
+    if (fused_activation == kTfLiteActNone) {
+        return OkStatus();
+    }
+    const auto& outputs = graph->FindOutputs(node->id);
+    if (outputs.empty()) {
+        return InternalError("Empty outputs in fused node");
+    }
+    switch (fused_activation) {
+        case kTfLiteActRelu:
+        case kTfLiteActRelu1:
+        case kTfLiteActRelu6: {
+            ReLUAttributes attr;
+            attr.clip =
+                fused_activation == kTfLiteActRelu
+                    ? 0.0f
+                    : (fused_activation == kTfLiteActRelu1 ? 1.0f : 6.0f);
+            for (auto index : output_indices) {
+                Node* activation_node;
+                RETURN_IF_ERROR(NewPassthroughNode(graph, node, outputs[index],
+                                                   &activation_node));
+                activation_node->operation.type = ToString(OperationType::RELU);
+                activation_node->operation.attributes = attr;
+            }
+            break;
+        }
+        case kTfLiteActTanh:
+            for (auto index : output_indices) {
+                Node* activation_node;
+                RETURN_IF_ERROR(NewPassthroughNode(graph, node, outputs[index],
+                                                   &activation_node));
+                activation_node->operation.type = ToString(OperationType::TANH);
+            }
+            break;
+        default:
+            return NotFoundError(absl::StrCat("Unsupported fused activation: ",
+                                              fused_activation));
+    }
+    return OkStatus();
+}
+
+Status MaybeFuseActivationToTheSingleOutput(
+    TfLiteFusedActivation fused_activation, TabeqGraph* graph, Node* node) {
+    if (graph->FindOutputs(node->id).size() != 1) {
+        return InternalError("Number of outputs exceeds 1");
+    }
+    return MaybeFuseActivation(fused_activation, {0}, graph, node);
+}
+
+// HW ToHW(int32_t h, int32_t w) { return HW(h > 0 ? h : 1, w > 0 ? w : 1); }
+
+Shape HW(int32_t h, int32_t w) {
+    Shape s;
+    s.layout = Layout::HW;
+    s.h = h > 0 ? h : 1;
+    s.w = w > 0 ? w : 1;
+    return s;
+}
+
+template <typename AttrT>
+void UpdatePadding(const TfLitePadding& padding, const Shape& input_shape,
+                   AttrT* attr) {
+    if (padding == kTfLitePaddingSame) {
+        attr->padding = CalculateSamePadding(input_shape, *attr);
+    } else {
+        attr->padding.prepended = HW(0, 0);
+        attr->padding.appended = HW(0, 0);
+    }
+}
+
+class ElementwiseOperationParser : public TFLiteOperationParser {
+   public:
+    explicit ElementwiseOperationParser(OperationType operation_type)
+        : operation_type_(operation_type) {}
+
+    Status IsSupported(const TfLiteContext* context,
+                       const TfLiteNode* tflite_node,
+                       const TfLiteRegistration* registration) final {
+        RETURN_IF_ERROR(CheckMaxSupportedOpVersion(registration, 1));
+        if (IsOneArgumentOperation()) {
+            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+                                               /*inputs=*/1,
+                                               /*outputs=*/1));
+        } else if (IsTwoArgumentOperation()) {
+            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+                                               /*inputs=*/2,
+                                               /*outputs=*/1));
+        } else {
+            return InvalidArgumentError(
+                "Op can only handle 1 or 2 operand(s).");
+        }
+        TfLiteFusedActivation activation;
+        RETURN_IF_ERROR(GetActivation(tflite_node, &activation));
+        return IsActivationSupported(activation);
+    }
+
+    Status Parse(const TfLiteNode* tflite_node,
+                 const TfLiteRegistration* registration, TabeqGraph* graph,
+                 ObjectReader* reader) final {
+        Node* node = graph->NewNode();
+        node->operation.type = ToString(operation_type_);
+
+        if (IsOneArgumentOperation()) {
+            RETURN_IF_ERROR(reader->AddInput(node, 0));
+        } else if (IsTwoArgumentOperation()) {
+            if (tflite_node->inputs->size != 2) {
+                return InvalidArgumentError("Applies only two input tensors");
+            }
+            RETURN_IF_ERROR(reader->AddInput(node, 0));
+            RETURN_IF_ERROR(reader->AddInput(node, 1));
+
+            TfLiteFusedActivation activation = kTfLiteActNone;
+            switch (operation_type_) {
+                case OperationType::SUB: {
+                    const auto* tf_options =
+                        reinterpret_cast<const TfLiteSubParams*>(
+                            tflite_node->builtin_data);
+                    if (tf_options != nullptr) {
+                        activation = tf_options->activation;
+                    }
+                    break;
+                }
+                case OperationType::DIV: {
+                    const auto* tf_options =
+                        reinterpret_cast<const TfLiteDivParams*>(
+                            tflite_node->builtin_data);
+                    if (tf_options != nullptr) {
+                        activation = tf_options->activation;
+                    }
+                    break;
+                }
+                default:
+                    // No activation expected.
+                    activation = kTfLiteActNone;
+            }
+
+            if (activation) {
+                RETURN_IF_ERROR(MaybeFuseActivationToTheSingleOutput(
+                    activation, graph, node));
+            }
+        } else {
+            return InvalidArgumentError("Incorrect operation type passed");
+        }
+
+        return reader->AddOutputs(node);
+    }
+
+   private:
+    Status GetActivation(const TfLiteNode* tflite_node,
+                         TfLiteFusedActivation* activation) const {
+        if (operation_type_ == OperationType::DIV) {
+            TfLiteDivParams* tf_options;
+            RETURN_IF_ERROR(RetrieveBuiltinData(tflite_node, &tf_options));
+            *activation = tf_options ? tf_options->activation : kTfLiteActNone;
+            return OkStatus();
+        }
+        if (operation_type_ == OperationType::SUB) {
+            TfLiteSubParams* tf_options;
+            RETURN_IF_ERROR(RetrieveBuiltinData(tflite_node, &tf_options));
+            *activation = tf_options ? tf_options->activation : kTfLiteActNone;
+            return OkStatus();
+        }
+
+        // Return kTfLiteActNone as other ops either do not have TfLiteXxxParams
+        // or TfLiteXxxParams.activation.
+        *activation = kTfLiteActNone;
+        return OkStatus();
+    }
+
+    bool IsOneArgumentOperation() const {
+        switch (operation_type_) {
+            case OperationType::ABS:
+            case OperationType::COS:
+            case OperationType::LOG:
+            case OperationType::RSQRT:
+            case OperationType::SIGMOID:
+            case OperationType::SIN:
+            case OperationType::SQRT:
+            case OperationType::SQUARE:
+            case OperationType::TANH:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool IsTwoArgumentOperation() const {
+        switch (operation_type_) {
+            case OperationType::DIV:
+            case OperationType::POW:
+            case OperationType::SQUARED_DIFF:
+            case OperationType::SUB:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    OperationType operation_type_;
 };
 
 class FullyConnectedOperationParser : public TFLiteOperationParser {
@@ -621,9 +890,11 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
         case kTfLiteBuiltinSquaredDifference:
             return absl::make_unique<ElementwiseOperationParser>(
                 OperationType::SQUARED_DIFF);
+#endif
         case kTfLiteBuiltinSub:
             return absl::make_unique<ElementwiseOperationParser>(
                 OperationType::SUB);
+#if 0
         case kTfLiteBuiltinTanh:
             return absl::make_unique<ElementwiseOperationParser>(
                 OperationType::TANH);
