@@ -286,22 +286,22 @@ Status SetAllDimensions(const TfLiteIntArray* dimensions, Layout layout,
     return OkStatus();
 }
 
-Status CreateVectorCopyData(const TfLiteTensor& tensor, TabeqTensor& qt) {
+Status CreateVectorCopyData(const TfLiteTensor& tfTensor, TabeqTensor& qt) {
 
-    ConvertTensorType(tensor, qt.type);
+    ConvertTensorType(tfTensor, qt.type);
 
     int esz = qt.elementSize();
-    int sz = NumElements(&tensor) * esz;
+    int sz = NumElements(&tfTensor) * esz;
 
-    if (tensor.bytes % esz != 0) {
+    if (tfTensor.bytes % esz != 0) {
         return InvalidArgumentError(
-            absl::StrCat("Input data size ", tensor.bytes,
+            absl::StrCat("Input data size ", tfTensor.bytes,
                          " is not aligned to expected type: ", esz));
     }
 
     qt.data.resize(sz);
 
-    std::memcpy(&qt.data[0], tensor.data.uint8, sz);
+    std::memcpy(&qt.data[0], tfTensor.data.uint8, sz);
     return OkStatus();
 }
 
@@ -349,7 +349,7 @@ class ObjectReader {
 
         // Axis and data layout depend on operation this tensor is used in.
         // So, postpone resolutions until operations are parsed.
-        t->id = tensor_idx;
+        t->ref = tensor_idx;
         return SetAllDimensions(tflite_tensor->dims, layout, t->shape);
     }
 
@@ -387,13 +387,28 @@ class ObjectReader {
         }
         if ((*tensor_to_value_)[tensor_idx] == nullptr) {
             const TfLiteTensor& tflite_tensor = context_->tensors[tensor_idx];
-            if (tflite::IsConstantTensor(&tflite_tensor)) {
-                return NotFoundError(absl::StrCat(
-                    "ReadValue: value is a constant tensor: ", tensor_idx));
-            }
+
+            // -- CEP: Need to think more about how we handle constants
+            // in jinterc.  The original approach was this:
+            //
+            // if (tflite::IsConstantTensor(&tflite_tensor)) {
+            //     return NotFoundError(absl::StrCat(
+            //         "ReadValue: value is a constant tensor: ", tensor_idx));
+            // }
             Value<TensorRef>* value = graph_->NewValue();
-            RETURN_IF_ERROR(
-                ConvertTfLiteTensorToTensorRef(tflite_tensor, &value->tensor));
+
+            // -- CEP: In the new approach, keep a copy of the constant data,
+            // to be moved into graph constant memory at run time.
+            //
+            if (tflite::IsConstantTensor(&tflite_tensor)) {
+                CreateVectorCopyData(tflite_tensor, value->tensor);
+                SetAllDimensions(tflite_tensor.dims, Layout::BHWC,
+                                 value->tensor.shape);
+            } else {
+                RETURN_IF_ERROR(ConvertTfLiteTensorToTensorRef(tflite_tensor,
+                                                               &value->tensor));
+            }
+
             value->tensor.ref = tensor_idx;
             (*tensor_to_value_)[tensor_idx] = value;
         }
@@ -589,13 +604,23 @@ class ElementwiseOperationParser : public TFLiteOperationParser {
                        const TfLiteRegistration* registration) final {
         RETURN_IF_ERROR(CheckMaxSupportedOpVersion(registration, 1));
         if (IsOneArgumentOperation()) {
-            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
-                                               /*inputs=*/1,
-                                               /*outputs=*/1));
+            if (tflite_node->inputs->size != 1) {
+                return UnimplementedError("Operation requires one input.");
+            }
+            // -- CEP: Why are constant tensors not regarded as a input?
+            //
+            // RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+            //                                    /*inputs=*/1,
+            //                                    /*outputs=*/1));
         } else if (IsTwoArgumentOperation()) {
-            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
-                                               /*inputs=*/2,
-                                               /*outputs=*/1));
+            if (tflite_node->inputs->size != 2) {
+                return UnimplementedError("Operation requires two inputs.");
+            }
+            // -- CEP: Why are constant tensors not regarded as a input?
+            //
+            // RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+            //                                    /*inputs=*/2,
+            //                                    /*outputs=*/1));
         } else {
             return InvalidArgumentError(
                 "Op can only handle 1 or 2 operand(s).");
@@ -737,6 +762,7 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
         const auto* tf_options =
             reinterpret_cast<const TfLiteFullyConnectedParams*>(
                 tflite_node->builtin_data);
+
         if (tf_options->weights_format !=
             kTfLiteFullyConnectedWeightsFormatDefault) {
             return UnimplementedError(
