@@ -195,6 +195,28 @@ Status ConvertTfLiteTensorToTensorRef(const TfLiteTensor& tflite_tensor,
     return ExtractTensorShape(tflite_tensor, tensor_ref->shape);
 }
 
+FusedActivation ConvertTfliteActivationToTabeq(
+    TfLiteFusedActivation activation) {
+    switch (activation) {
+        case kTfLiteActRelu:
+            return FusedActivation::ActRelu;
+        case kTfLiteActRelu1:
+            return FusedActivation::ActRelu1;
+        case kTfLiteActRelu6:
+            return FusedActivation::ActRelu6;
+        case kTfLiteActTanh:
+            return FusedActivation::ActTanh;
+        case kTfLiteActSignBit:
+            return FusedActivation::ActSignBit;
+        case kTfLiteActSigmoid:
+            return FusedActivation::ActSigmoid;
+        case kTfLiteActNone:
+            return FusedActivation::ActNone;
+        default:
+            EVX("Unsupported tensorflow activation");
+    }
+}
+
 Status CheckUnityDimensions(const TfLiteIntArray* dimensions) {
 
     if (dimensions->size < 0) {
@@ -573,15 +595,7 @@ Status MaybeFuseActivationToTheSingleOutput(
     return MaybeFuseActivation(fused_activation, {0}, graph, node);
 }
 
-// HW ToHW(int32_t h, int32_t w) { return HW(h > 0 ? h : 1, w > 0 ? w : 1); }
-
-Shape HW(int32_t h, int32_t w) {
-    Shape s;
-    s.layout = Layout::HW;
-    s.h = h > 0 ? h : 1;
-    s.w = w > 0 ? w : 1;
-    return s;
-}
+Shape ToHW(int32_t h, int32_t w) { return HW(h > 0 ? h : 1, w > 0 ? w : 1); }
 
 template <typename AttrT>
 void UpdatePadding(const TfLitePadding& padding, const Shape& input_shape,
@@ -593,6 +607,93 @@ void UpdatePadding(const TfLitePadding& padding, const Shape& input_shape,
         attr->padding.appended = HW(0, 0);
     }
 }
+
+Status CheckStrides(int strides_h, int strides_w) {
+    if (strides_h <= 0 || strides_w <= 0) {
+        return InvalidArgumentError(absl::StrFormat(
+            "Incorrect stride values: stride_height = %d, stride_width = %d.",
+            strides_h, strides_w));
+    }
+    return OkStatus();
+}
+
+Status CheckDilation(int dilation_h, int dilation_w) {
+    if (dilation_h <= 0 || dilation_w <= 0) {
+        return InvalidArgumentError(
+            absl::StrFormat("Incorrect dilation values: dilation_factor = %d, "
+                            "dilation_factor = %d.",
+                            dilation_h, dilation_w));
+    }
+    return OkStatus();
+}
+
+Status CheckStridesAndDilation(int strides_h, int strides_w, int dilation_h,
+                               int dilation_w) {
+    RETURN_IF_ERROR(CheckStrides(strides_h, strides_w));
+    RETURN_IF_ERROR(CheckDilation(dilation_h, dilation_w));
+    return OkStatus();
+}
+
+class Conv2DOperationParser : public TFLiteOperationParser {
+   public:
+    Status IsSupported(const TfLiteContext* context,
+                       const TfLiteNode* tflite_node,
+                       const TfLiteRegistration* registration) final {
+        RETURN_IF_ERROR(CheckMaxSupportedOpVersion(registration, 1));
+        RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node, /*inputs=*/1,
+                                           /*outputs=*/1));
+        RETURN_IF_ERROR(CheckTensorIsAvailable(context, tflite_node, 1));
+        TfLiteConvParams* tf_options = nullptr;
+        RETURN_IF_ERROR(RetrieveBuiltinData(tflite_node, &tf_options));
+        RETURN_IF_ERROR(CheckStridesAndDilation(
+            tf_options->stride_height, tf_options->stride_width,
+            tf_options->dilation_height_factor,
+            tf_options->dilation_width_factor));
+        return IsActivationSupported(tf_options->activation);
+    }
+
+    Status Parse(const TfLiteNode* tflite_node,
+                 const TfLiteRegistration* registration, TabeqGraph* graph,
+                 ObjectReader* reader) final {
+        Node* node = graph->NewNode();
+        node->operation.type = ToString(OperationType::CONVOLUTION_2D);
+        RETURN_IF_ERROR(reader->AddInput(node, 0));
+        RETURN_IF_ERROR(reader->AddOutputs(node));
+
+        Convolution2DAttributes attr;
+        RETURN_IF_ERROR(reader->ReadTensor(1, Layout::OHWI, &attr.weights));
+        reader->ReadTensor(2, Layout::LINEAR, &attr.bias)
+            .IgnoreError();  // bias is optional
+
+        const auto* tf_options = reinterpret_cast<const TfLiteConvParams*>(
+            tflite_node->builtin_data);
+
+        if (!tf_options) {
+            return InternalError("Missing tflite params");
+        }
+
+        attr.strides =
+            ToHW(tf_options->stride_height, tf_options->stride_width);
+
+        attr.dilations = tflite::tabeq::HW(tf_options->dilation_height_factor,
+                                           tf_options->dilation_width_factor);
+
+        UpdatePadding(tf_options->padding,
+                      graph->FindInputs(node->id)[0]->tensor.shape, &attr);
+
+        attr.activation =
+            ConvertTfliteActivationToTabeq(tf_options->activation);
+
+        // -- TODO:  Perhaps not all operations can be fused, in which case
+        // add a dedicated node to do the function.
+        //
+        // RETURN_IF_ERROR(MaybeFuseActivationToTheSingleOutput(
+        //     tf_options->activation, graph, node));
+
+        node->operation.attributes = std::move(attr);
+        return OkStatus();
+    }
+};
 
 class ElementwiseOperationParser : public TFLiteOperationParser {
    public:
@@ -851,8 +952,25 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
                 PoolingType::AVERAGE);
         case kTfLiteBuiltinConcatenation:
             return absl::make_unique<ConcatenationOperationParser>();
-        case kTfLiteBuiltinConv2d:
-            return absl::make_unique<Conv2DOperationParser>();
+#endif
+
+        /**
+         * To simplify bring-up, only do one conv2d at first.
+         */
+        case kTfLiteBuiltinConv2d: {
+
+            static const TfLiteRegistration* onlyRegistration = nullptr;
+
+            if (onlyRegistration == nullptr ||
+                onlyRegistration == registration) {
+
+                onlyRegistration = registration;
+                return absl::make_unique<Conv2DOperationParser>();
+            }
+
+            return absl::make_unique<UnsupportedOperationParser>();
+        }
+#if 0
         case kTfLiteBuiltinCos:
             return absl::make_unique<ElementwiseOperationParser>(
                 OperationType::COS);
