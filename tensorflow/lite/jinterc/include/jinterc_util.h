@@ -4,6 +4,14 @@
 
 #include <jinterc/jinterc.h>
 
+/**
+ * Debugging routines
+ */
+extern "C" {
+extern void cepName(const char *newName); 
+extern void cepFloats(void *p, int nbytes);
+}
+
 namespace tflite {
 namespace jinterc {
 

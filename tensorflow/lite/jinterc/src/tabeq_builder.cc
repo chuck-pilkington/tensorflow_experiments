@@ -954,6 +954,7 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
             return absl::make_unique<ConcatenationOperationParser>();
 #endif
 
+#if 1
         /**
          * To simplify bring-up, only do one conv2d at first.
          */
@@ -970,6 +971,8 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
 
             return absl::make_unique<UnsupportedOperationParser>();
         }
+#endif
+
 #if 0
         case kTfLiteBuiltinCos:
             return absl::make_unique<ElementwiseOperationParser>(
