@@ -57,6 +57,7 @@ namespace tabeq {
 using namespace ::tabeq;
 
 using TabeqTensor = ::tabeq::Tensor;
+using TabeqShape = ::tabeq::Shape;
 
 // Creates a node that consumes output from the given node. Because output need
 // to stay the same, newly created node will inherit the output from the given
@@ -482,6 +483,18 @@ Status RetrieveBuiltinData(const TfLiteNode* tflite_node,
     return OkStatus();
 }
 
+template <typename ParamsType>
+Status RetrieveCustomInitialData(const TfLiteNode* tflite_node,
+                                 ParamsType** tf_options) {
+    const auto* params =
+        reinterpret_cast<const ParamsType*>(tflite_node->custom_initial_data);
+    if (!params) {
+        return InternalError("Unable to retrieve custom_initial_data.");
+    }
+    *tf_options = const_cast<ParamsType*>(params);
+    return OkStatus();
+}
+
 Status CheckInputsOutputs(const TfLiteContext* context,
                           const TfLiteNode* tflite_node, int inputs,
                           int outputs) {
@@ -608,6 +621,15 @@ void UpdatePadding(const TfLitePadding& padding, const Shape& input_shape,
     }
 }
 
+Status CheckKernels(int kernel_h, int kernel_w) {
+    if (kernel_h <= 0 || kernel_w <= 0) {
+        return InvalidArgumentError(absl::StrFormat(
+            "Incorrect kernel values: kernel_height = %d, kernel_width = %d.",
+            kernel_h, kernel_w));
+    }
+    return OkStatus();
+}
+
 Status CheckStrides(int strides_h, int strides_w) {
     if (strides_h <= 0 || strides_w <= 0) {
         return InvalidArgumentError(absl::StrFormat(
@@ -631,6 +653,43 @@ Status CheckStridesAndDilation(int strides_h, int strides_w, int dilation_h,
                                int dilation_w) {
     RETURN_IF_ERROR(CheckStrides(strides_h, strides_w));
     RETURN_IF_ERROR(CheckDilation(dilation_h, dilation_w));
+    return OkStatus();
+}
+
+Status CheckKernelsAndStrides(int kernel_h, int kernel_w, int strides_h,
+                              int strides_w) {
+    RETURN_IF_ERROR(CheckKernels(kernel_h, kernel_w));
+    RETURN_IF_ERROR(CheckStrides(strides_h, strides_w));
+    return OkStatus();
+}
+
+// Creates a simple node that holds tensor value.
+Status NewConstNode(TabeqTensor t, TabeqGraph* graph, TabeqValue** value) {
+    ConstTensorAttributes attr;
+    attr.tensor = std::move(t);
+    Node* node = graph->NewNode();
+    node->operation.attributes = attr;
+    node->operation.type = ToString(OperationType::CONST);
+    *value = graph->NewValue();
+    RETURN_IF_ERROR(graph->SetProducer(node->id, (*value)->id));
+    // Keep data inside this tensor.
+    (*value)->tensor.ref = attr.tensor.ref;
+    (*value)->tensor.type = attr.tensor.type;
+    (*value)->tensor.shape = attr.tensor.shape;
+
+    // -- Just a very quick syntax check was done so far...
+    //
+    EVX("Need to verify if NewConstNode is correct");
+
+    return OkStatus();
+}
+
+Status ParsePoolingAttributes(const TfLitePoolParams* tf_options,
+                              const TabeqShape& input_shape,
+                              Pooling2DAttributes* attr) {
+    attr->kernel = ToHW(tf_options->filter_height, tf_options->filter_width);
+    attr->strides = ToHW(tf_options->stride_height, tf_options->stride_width);
+    UpdatePadding(tf_options->padding, input_shape, attr);
     return OkStatus();
 }
 
@@ -836,6 +895,85 @@ class ElementwiseOperationParser : public TFLiteOperationParser {
     OperationType operation_type_;
 };
 
+class Pooling2DOperationParser : public TFLiteOperationParser {
+   public:
+    Status IsSupported(const TfLiteContext* context,
+                       const TfLiteNode* tflite_node,
+                       const TfLiteRegistration* registration) final {
+        RETURN_IF_ERROR(CheckMaxSupportedOpVersion(registration, 1));
+        TfLitePoolParams* tf_options = nullptr;
+        auto status = RetrieveCustomInitialData(tflite_node, &tf_options);
+        if (status.ok()) {  // custom case with indices as a second output
+            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+                                               /*inputs=*/1,
+                                               /*outputs=*/2));
+        } else {  // common pooling with 1 output
+            RETURN_IF_ERROR(RetrieveBuiltinData(tflite_node, &tf_options));
+            RETURN_IF_ERROR(CheckInputsOutputs(context, tflite_node,
+                                               /*inputs=*/1,
+                                               /*outputs=*/1));
+        }
+        RETURN_IF_ERROR(CheckKernelsAndStrides(
+            tf_options->filter_height, tf_options->filter_width,
+            tf_options->stride_height, tf_options->stride_width));
+        return IsActivationSupported(tf_options->activation);
+    }
+
+   public:
+    explicit Pooling2DOperationParser(PoolingType type) : type_(type) {}
+
+    Status Parse(const TfLiteNode* tflite_node,
+                 const TfLiteRegistration* registration, TabeqGraph* graph,
+                 ObjectReader* reader) final {
+        Node* node = graph->NewNode();
+        node->operation.type = ToString(OperationType::POOLING_2D);
+        RETURN_IF_ERROR(reader->AddInput(node, 0));
+        RETURN_IF_ERROR(reader->AddOutput(node, 0));
+
+        Pooling2DAttributes attr;
+        attr.type = type_;
+
+        auto input_shape = graph->FindInputs(node->id)[0]->tensor.shape;
+
+        // check whether there are custom options encoded. It happens if
+        // operation is MaxPoolingWithArgmax2D. There is no way to read
+        // tflite_node->builtin_code, so, simply check whether custom data is
+        // available.
+        auto* tf_options = reinterpret_cast<const TfLitePoolParams*>(
+            tflite_node->custom_initial_data);
+        if (!tf_options) {
+            tf_options = reinterpret_cast<const TfLitePoolParams*>(
+                tflite_node->builtin_data);
+        }
+        if (!tf_options) {
+            return InternalError("Missing tflite params");
+        }
+
+        std::vector<uint32_t> max_tensor_id{0};
+        RETURN_IF_ERROR(MaybeFuseActivation(tf_options->activation,
+                                            max_tensor_id, graph, node));
+        // Second output is optional. It is not required, it but must be added
+        // after MaybeAddFusedActivation function is called
+        reader->AddOutput(node, 1).IgnoreError();
+
+        // First output is the result of pooling operation, while second output
+        // is indices used for pooling.
+        auto outputs = graph->FindOutputs(node->id);
+        attr.output_indices = outputs.size() == 2;
+        if (attr.output_indices) {
+            // Fix data type for output indices. In the model it is set as
+            // float32.
+            outputs[1]->tensor.type = DataType::INT32;
+        }
+        RETURN_IF_ERROR(ParsePoolingAttributes(tf_options, input_shape, &attr));
+        node->operation.attributes = attr;
+        return OkStatus();
+    }
+
+   private:
+    const PoolingType type_;
+};
+
 class FullyConnectedOperationParser : public TFLiteOperationParser {
    public:
     Status IsSupported(const TfLiteContext* context,
@@ -937,8 +1075,10 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
     const absl::string_view custom_name = registration->custom_name;
     switch (builtin_code) {
 
+#if 0
         case kTfLiteBuiltinFullyConnected:
             return absl::make_unique<FullyConnectedOperationParser>();
+#endif
 
 #if 0  // -- TODO: Implement these!
        //
@@ -959,6 +1099,9 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
          * To simplify bring-up, only do one conv2d at first.
          */
         case kTfLiteBuiltinConv2d: {
+#if 1
+            return absl::make_unique<Conv2DOperationParser>();
+#else
 
             static const TfLiteRegistration* onlyRegistration = nullptr;
 
@@ -970,6 +1113,7 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
             }
 
             return absl::make_unique<UnsupportedOperationParser>();
+#endif
         }
 #endif
 
@@ -994,9 +1138,15 @@ std::unique_ptr<TFLiteOperationParser> NewOperationParser(
                 OperationType::LOG);
         case kTfLiteBuiltinLstm:
             return absl::make_unique<LSTMOperationParser>();
+#endif
+
+#if 1
         case kTfLiteBuiltinMaxPool2d:
             return absl::make_unique<Pooling2DOperationParser>(
                 PoolingType::MAX);
+#endif
+
+#if 0
         case kTfLiteBuiltinMul:
             return absl::make_unique<MulOperationParser>();
         case kTfLiteBuiltinPad:
