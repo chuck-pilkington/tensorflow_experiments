@@ -1029,6 +1029,9 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
 
         Node* conv = node;
         if (input->tensor.shape.h != 1 || input->tensor.shape.w != 1) {
+#if 1
+            printf("TODO: Decide if we need reshape ops...\n");
+#else
             auto& reshape = node;
             conv = graph->NewNode();  // reset conv pointer!
             Value<TensorRef>* reshaped_value = graph->NewValue();
@@ -1040,6 +1043,7 @@ class FullyConnectedOperationParser : public TFLiteOperationParser {
             attr.new_shape = reshaped_value->tensor.shape;
             reshape->operation.attributes = attr;
             RETURN_IF_ERROR(graph->AddConsumer(conv->id, reshaped_value->id));
+#endif
         }
 
         conv->operation.type = ToString(OperationType::FULLY_CONNECTED);

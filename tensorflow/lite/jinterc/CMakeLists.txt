@@ -19,6 +19,8 @@ if(DEFINED ENV{SNPS_INSTALL_DIR})
 endif()
 
 find_package(tabeq REQUIRED)
+find_package(SystemCLanguage CONFIG REQUIRED)
+find_package(qtrace CONFIG REQUIRED)
 
 set(LOCAL_CFLAGS " -DGEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK -pthread")
 
